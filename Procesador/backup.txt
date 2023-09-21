@@ -1,0 +1,83 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"sync"
+)
+
+// Define una estructura para el mensaje JSON que esperamos recibir.
+type Specifications struct {
+	Name   string `json:"nombre"`
+	Type   string `json:"tipo"`
+	Memory int    `json:"memoria"`
+	CPU    int    `json:"cpu"`
+}
+
+type SpecificationsList struct {
+	sync.Mutex
+	Specifications []Specifications
+}
+
+var (
+	specificationsList SpecificationsList
+	mu                 sync.Mutex
+)
+
+func main() {
+
+	// Configura un manejador de solicitud para la ruta "/json".
+	manageServer()
+
+	// Inicia el servidor HTTP en el puerto 8080.
+	fmt.Println("Servidor escuchando en el puerto 8080...")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		fmt.Println("Error al iniciar el servidor:", err)
+	}
+}
+
+func manageServer() {
+	http.HandleFunc("/json", func(w http.ResponseWriter, r *http.Request) {
+		// Verifica que la solicitud sea del método POST.
+		if r.Method != http.MethodPost {
+			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Decodifica el JSON recibido en la solicitud en una estructura Message.
+		var specifications Specifications
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&specifications); err != nil {
+			http.Error(w, "Error al decodificar JSON", http.StatusBadRequest)
+			return
+		}
+
+		// Crea el comando en virtualBox
+		comandCreate := "Vboxmanage createvm --name " + specifications.Name + " --ostype " + specifications.Type
+		comandModify := "Vboxmanage modifyvm " + specifications.Name + " --memory " + strconv.Itoa(specifications.Memory) + " --vram 128"
+
+		// Imprimimos el mensaje JSON recibido.
+		fmt.Printf("-------------------------\n")
+		fmt.Printf("Nombre de la Máquina: %s\n", specifications.Name)
+		fmt.Printf("Sistema Operativo: %s\n", specifications.Type)
+		fmt.Printf("Memoria Requerida: %d Mb\n", specifications.Memory)
+		fmt.Printf("CPU Requerida: %d núcleos\n", specifications.CPU)
+		fmt.Printf("Comando Crear en VirtualBox: %s\n", comandCreate)
+		fmt.Printf("Comando Modificar en VirtualBox: %s\n", comandModify)
+
+		// Guarda en una lista.
+		mu.Lock()
+		specificationsList.Specifications = append(specificationsList.Specifications, specifications)
+		mu.Unlock()
+
+		fmt.Println("Cantidad de Solicitudes en la Lista: " + strconv.Itoa(len(specificationsList.Specifications)))
+
+		// Envía una respuesta al cliente.
+		response := map[string]string{"mensaje": "Mensaje JSON recibido correctamente"}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+	})
+}
