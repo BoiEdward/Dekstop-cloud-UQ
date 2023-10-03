@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -38,16 +39,6 @@ type Specifications struct {
 	OSType string `json:"tipoSO"`
 	Memory int    `json:"memoria"`
 	CPU    int    `json:"cpu"`
-}
-
-/*
-Estrucutura de datos tipo JSON que contiene los campos necesarios para iniciar sesiòn
-@Username Este campo representa el nombre de usuario
-@Password Este campo representa la contraseña
-*/
-type Account struct {
-	Username string `json:"nombre"`
-	Password string `json:"contrasenia"`
 }
 
 // Cola de especificaciones para la creaciòn de màquinas virtuales
@@ -243,23 +234,27 @@ func manageServer() {
 			return
 		}
 
-		var account Account
+		var persona Persona
 		decoder := json.NewDecoder(r.Body)
-		if err := decoder.Decode(&account); err != nil {
+		if err := decoder.Decode(&persona); err != nil {
 			http.Error(w, "Error al decodificar JSON de inicio de sesión", http.StatusBadRequest)
 			return
 		}
 
-		printAccount(account)
-
 		// Si las credenciales son válidas, devuelve un JSON con "loginCorrecto" en true, de lo contrario, en false.
-		query := "SELECT persona FROM persona WHERE usuario = ? AND contrasenia = ?"
-		var resultUsername string
+		query := "SELECT contrasenia FROM persona WHERE email = ?"
+		var resultPassword string
 
 		//Consulta en la base de datos si el usuario existe
-		err := db.QueryRow(query, account.Username, account.Password).Scan(&resultUsername)
-		if err == sql.ErrNoRows {
-			fmt.Println("Usuario no encontrado.")
+		err := db.QueryRow(query, persona.Email).Scan(&resultPassword)
+
+		err2 := bcrypt.CompareHashAndPassword([]byte(resultPassword), []byte(persona.Contrasenia))
+		if err2 != nil {
+			fmt.Println("Contraseña incorrecta")
+		} else {
+			fmt.Println("Contraseña correcta")
+		}
+		if err2 != nil {
 			response := map[string]bool{"loginCorrecto": false}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
@@ -267,7 +262,51 @@ func manageServer() {
 		} else if err != nil {
 			panic(err.Error())
 		} else {
-			fmt.Printf("Usuario encontrado: %s\n", resultUsername)
+			response := map[string]bool{"loginCorrecto": true}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(response)
+		}
+	})
+
+	//Endpoint para peticiones de inicio de sesiòn
+	http.HandleFunc("/json/signin", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var persona Persona
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&persona); err != nil {
+			http.Error(w, "Error al decodificar JSON de inicio de sesión", http.StatusBadRequest)
+			return
+		}
+
+		printAccount(persona)
+
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(persona.Contrasenia), bcrypt.DefaultCost)
+		if err != nil {
+			fmt.Println("Error al encriptar la contraseña:", err)
+			return
+		}
+
+		query := "INSERT INTO persona (nombre, apellido, email, contrasenia) VALUES ( ?, ?, ?, ? );"
+		var resultUsername string
+
+		//Consulta en la base de datos si el usuario existe
+		a, err := db.Exec(query, persona.Nombre, persona.Apellido, persona.Email, hashedPassword)
+		fmt.Println(a)
+		if err != nil {
+			fmt.Println("Error al registrar.")
+			response := map[string]bool{"loginCorrecto": false}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(response)
+		} else if err != nil {
+			panic(err.Error())
+		} else {
+			fmt.Printf("Registro correcto: %s\n", resultUsername)
 			response := map[string]bool{"loginCorrecto": true}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -417,11 +456,11 @@ func printSpecifications(specs Specifications, isCreateVM bool) {
 
 }
 
-func printAccount(account Account) {
+func printAccount(account Persona) {
 	// Imprime la cuenta recibida.
 	fmt.Printf("-------------------------\n")
-	fmt.Printf("Nombre de Usuario: %s\n", account.Username)
-	fmt.Printf("Contraseña: %s\n", account.Password)
+	fmt.Printf("Nombre de Usuario: %s\n", account.Nombre)
+	fmt.Printf("Contraseña: %s\n", account.Contrasenia)
 }
 
 /*
