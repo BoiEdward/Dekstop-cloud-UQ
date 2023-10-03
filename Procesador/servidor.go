@@ -314,6 +314,60 @@ func manageServer() {
 		}
 	})
 
+	//Endpoint para peticiones de inicio de sesiòn
+	http.HandleFunc("/json/consultMachine", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var persona Persona
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&persona); err != nil {
+			http.Error(w, "Error al decodificar JSON de inicio de sesión", http.StatusBadRequest)
+			return
+		}
+
+		printAccount(persona)
+
+		query := "SELECT nombre, sistema_operativo, estado FROM maquina_virtual WHERE persona_email = ?"
+		rows, err := db.Query(query, persona.Email)
+		if err != nil {
+			// Manejar el error
+			return
+		}
+		defer rows.Close()
+
+		var machines []Maquina_virtual
+		for rows.Next() {
+			var machine Maquina_virtual
+			if err := rows.Scan(&machine.Nombre, &machine.Sistema_operativo, &machine.Estado); err != nil {
+				// Manejar el error al escanear la fila
+				continue
+			}
+			machines = append(machines, machine)
+		}
+		fmt.Println(machines)
+
+		if err := rows.Err(); err != nil {
+			// Manejar el error al iterar a través de las filas
+			fmt.Println("no hay nada")
+			return
+		}
+
+		if len(machines) == 0 {
+			// No se encontraron máquinas virtuales para el usuario
+			fmt.Println("no hay nada")
+			return
+		}
+
+		// Respondemos con la lista de máquinas virtuales en formato JSON
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(machines)
+
+	})
+
 	//End point para modificar màquinas virtuales
 	http.HandleFunc("/json/modifyVM", func(w http.ResponseWriter, r *http.Request) {
 		// Verifica que la solicitud sea del método POST.
@@ -461,6 +515,8 @@ func printAccount(account Persona) {
 	fmt.Printf("-------------------------\n")
 	fmt.Printf("Nombre de Usuario: %s\n", account.Nombre)
 	fmt.Printf("Contraseña: %s\n", account.Contrasenia)
+	fmt.Printf("Email: %s\n", account.Email)
+
 }
 
 /*
