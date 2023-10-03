@@ -27,26 +27,6 @@ var db *sql.DB
 // Variable que almacena la ruta de la llave privada ingresada por paametro cuando de ejecuta el programa
 var privateKeyPath = flag.String("key", "", "Ruta de la llave privada SSH")
 
-/*
-Estructura tipo JSON que contiene los datos que ingresa el usuario para la creaciòn de una MV
-@Name Este campo representa el nombre de la màquina virtual a crear
-@OSType Este campo representa el tipo de sistema operativo de la màquina virtual
-@Memory Este campo representa la cantidad de memoria RAM a asiganar a la MV
-@CPU Este campo representa la cantidad de unidades de procesamiento de la MV
-*/
-type Specifications struct {
-	Name   string `json:"nombre"`
-	OSType string `json:"tipoSO"`
-	Memory int    `json:"memoria"`
-	CPU    int    `json:"cpu"`
-}
-
-// Cola de especificaciones para la creaciòn de màquinas virtuales
-type SpecificationsQueue struct {
-	sync.Mutex
-	Queue *list.List
-}
-
 // Cola de especificaciones para la gestiòn de màquinas virtuales
 // La gestiòn puede ser: modificar, eliminar, iniciar, detener una MV.
 type ManagementQueue struct {
@@ -90,6 +70,12 @@ type Maquina_virtual struct {
 	Estado            string
 	Hostname          string
 	Ip                string
+	Persona_email     string
+}
+
+type Maquina_virtualQueue struct {
+	sync.Mutex
+	Queue *list.List
 }
 
 /*
@@ -140,10 +126,10 @@ type Catalogo struct {
 
 // Declaraciòn de variables globales
 var (
-	specificationsQueue SpecificationsQueue
-	managementQueue     ManagementQueue
-	mu                  sync.Mutex
-	lastQueueSize       int
+	maquina_virtualesQueue Maquina_virtualQueue
+	managementQueue        ManagementQueue
+	mu                     sync.Mutex
+	lastQueueSize          int
 )
 
 func main() {
@@ -163,7 +149,7 @@ func main() {
 	manageServer()
 
 	// Función que verifica la cola de especificaciones constantemente.
-	go checkSpecificationsQueueChanges()
+	go checkMaquinasVirtualesQueueChanges()
 
 	// Función que verifica la cola de cuentas constantemente.
 	go checkManagementQueueChanges()
@@ -194,11 +180,11 @@ por solicitudes HTTP. Se encarga tambièn de ingresar las peticiones para gesti�
 Si la peticiòn es de inicio de sesiòn, la gestiona inmediatamente.
 */
 func manageServer() {
-	specificationsQueue.Queue = list.New()
+	maquina_virtualesQueue.Queue = list.New()
 	managementQueue.Queue = list.New()
 
 	//Endpoint para las peticiones de creaciòn de màquinas virtuales
-	http.HandleFunc("/json/specifications", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/json/createVirtualMachine", func(w http.ResponseWriter, r *http.Request) {
 		// Verifica que la solicitud sea del método POST.
 		if r.Method != http.MethodPost {
 			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
@@ -206,19 +192,21 @@ func manageServer() {
 		}
 
 		// Decodifica el JSON recibido en la solicitud en una estructura Specifications.
-		var specifications Specifications
+		var maquina_virtual Maquina_virtual
 		decoder := json.NewDecoder(r.Body)
-		if err := decoder.Decode(&specifications); err != nil {
+		if err := decoder.Decode(&maquina_virtual); err != nil {
 			http.Error(w, "Error al decodificar JSON de especificaciones", http.StatusBadRequest)
 			return
 		}
 
+		fmt.Println(maquina_virtual)
+
 		// Encola las especificaciones.
 		mu.Lock()
-		specificationsQueue.Queue.PushBack(specifications)
+		maquina_virtualesQueue.Queue.PushBack(maquina_virtual)
 		mu.Unlock()
 
-		fmt.Println("Cantidad de Solicitudes de Especificaciones en la Cola: " + strconv.Itoa(specificationsQueue.Queue.Len()))
+		fmt.Println("Cantidad de Solicitudes de Especificaciones en la Cola: " + strconv.Itoa(maquina_virtualesQueue.Queue.Len()))
 
 		// Envía una respuesta al cliente.
 		response := map[string]string{"mensaje": "Mensaje JSON de especificaciones recibido correctamente"}
@@ -456,32 +444,30 @@ func manageServer() {
 
 }
 
-/* Funciòn que se encarga de gestionar la cola de peticiones para la creaciòn de màquinas virtuales
- */
-func checkSpecificationsQueueChanges() {
+func checkMaquinasVirtualesQueueChanges() {
 	for {
 		// Verifica si el tamaño de la cola de especificaciones ha cambiado.
 		mu.Lock()
-		currentQueueSize := specificationsQueue.Queue.Len()
+		currentQueueSize := maquina_virtualesQueue.Queue.Len()
 		mu.Unlock()
 
 		if currentQueueSize > 0 {
 			// Imprime y elimina el primer elemento de la cola de especificaciones.
 			mu.Lock()
-			firstElement := specificationsQueue.Queue.Front()
-			specificationsQueue.Queue.Remove(firstElement)
+			firstElement := maquina_virtualesQueue.Queue.Front()
+			maquina_virtualesQueue.Queue.Remove(firstElement)
 			mu.Unlock()
 
 			// Procesa el primer elemento (en este caso, imprime las especificaciones).
-			config, err := configurarSSH("jhoiner", *privateKeyPath)
+			config, err := configurarSSH("Edward", *privateKeyPath)
 			if err != nil {
 				log.Fatal("Error al configurar SSH:", err)
 				return
 			}
 
-			crateVM(firstElement.Value.(Specifications), config) //En el segundo argumento debe ir la ip del host en el cual se va a crear la VM
+			crateVM(firstElement.Value.(Maquina_virtual), config) //En el segundo argumento debe ir la ip del host en el cual se va a crear la VM
 
-			printSpecifications(firstElement.Value.(Specifications), true)
+			printMaquinaVirtual(firstElement.Value.(Maquina_virtual), true)
 		}
 
 		// Espera un segundo antes de verificar nuevamente.
@@ -496,17 +482,31 @@ func checkSpecificationsQueueChanges() {
 @isCreateVM Variable de tipo booleana que si es verdadera significa que la peticiòn es de crear una màquina virtual. En caso contrario
 indica que la peticiòn es para modificar una màquina virtual
 */
-func printSpecifications(specs Specifications, isCreateVM bool) {
+func printSpecifications(specs Maquina_virtual, isCreateVM bool) {
 	// Crea el comando en VirtualBox
 	//comandCreate := "Vboxmanage createvm --name " + specs.Name + " --ostype " + specs.OSType
 	//comandModify := "Vboxmanage modifyvm " + specs.Name + " --memory " + strconv.Itoa(specs.Memory) + " --vram 128"
 
 	// Imprime las especificaciones recibidas.
 	fmt.Printf("-------------------------\n")
-	fmt.Printf("Nombre de la Máquina: %s\n", specs.Name)
-	fmt.Printf("Sistema Operativo: %s\n", specs.OSType)
-	fmt.Printf("Memoria Requerida: %d Mb\n", specs.Memory)
-	fmt.Printf("CPU Requerida: %d núcleos\n", specs.CPU)
+	fmt.Printf("Nombre de la Máquina: %s\n", specs.Nombre)
+	fmt.Printf("Sistema Operativo: %s\n", specs.Sistema_operativo)
+	fmt.Printf("Memoria Requerida: %d Mb\n", specs.Memoria)
+	fmt.Printf("CPU Requerida: %d núcleos\n", specs.Cpu)
+
+}
+
+func printMaquinaVirtual(specs Maquina_virtual, isCreateVM bool) {
+	// Crea el comando en VirtualBox
+	//comandCreate := "Vboxmanage createvm --name " + specs.Name + " --ostype " + specs.OSType
+	//comandModify := "Vboxmanage modifyvm " + specs.Name + " --memory " + strconv.Itoa(specs.Memory) + " --vram 128"
+
+	// Imprime las especificaciones recibidas.
+	fmt.Printf("-------------------------\n")
+	fmt.Printf("Nombre de la Máquina: %s\n", specs.Nombre)
+	fmt.Printf("Sistema Operativo: %s\n", specs.Sistema_operativo)
+	fmt.Printf("Memoria Requerida: %d Mb\n", specs.Memoria)
+	fmt.Printf("CPU Requerida: %d núcleos\n", specs.Cpu)
 
 }
 
@@ -585,6 +585,8 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 	//Ejecuta el comando remoto
 	output, err := session.CombinedOutput(comando)
 	if err != nil {
+		fmt.Println(err)
+		fmt.Println(comando)
 		log.Fatalf("Error al ejecutar el comando remoto: %s", err)
 	}
 
@@ -601,34 +603,33 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 @hostIP Paràmetro que contiene la direcciòn IP del host--------------------------------------
 @config Paràmetro que contiene la configuraciòn de la conexiòn SSH con el host
 */
-func crateVM(specs Specifications, config *ssh.ClientConfig) {
+func crateVM(specs Maquina_virtual, config *ssh.ClientConfig) {
 
 	//---Selecciona un host al azar
 	host := selectHost()
 
 	//Comando para crear una màquina virtual
-	createVM := "VBoxManage createvm --name " + specs.Name + " --ostype " + specs.OSType + " --register"
+	createVM := "VBoxManage createvm --name " + specs.Nombre + " --ostype " + specs.Sistema_operativo + " --register"
 	uuid := enviarComandoSSH(host.Ip, createVM, config)
 
 	//Comando para asignar la memoria RAM a la MV
-	memoryCommand := "VBoxManage modifyvm " + specs.Name + " --memory " + strconv.Itoa(specs.Memory)
+	memoryCommand := "VBoxManage modifyvm " + specs.Nombre + " --memory " + strconv.Itoa(specs.Memoria)
 	enviarComandoSSH(host.Ip, memoryCommand, config)
 
 	//Comando para agregar el controlador de almacenamiento
-	sctlCommand := "VBoxManage storagectl " + specs.Name + " --name hardisk --add sata"
+	sctlCommand := "VBoxManage storagectl " + specs.Nombre + " --name hardisk --add sata"
 	enviarComandoSSH(host.Ip, sctlCommand, config)
 
 	//Comando para conectar el disco multiconexiòn a la MV
-	//sattachCommand := "VBoxManage storageattach " + spects.Name + " --storagectl hardisk --port 0 --device 0 --type hdd --medium C:/users/jhoiner/disks/debian.vdi"
-	sattachCommand := "VBoxManage storageattach " + specs.Name + " --storagectl hardisk --port 0 --device 0 --type hdd --medium " + "\"" + host.Ruta_disco_multi + "\""
+	sattachCommand := "VBoxManage storageattach " + specs.Nombre + " --storagectl hardisk --port 0 --device 0 --type hdd --medium " + "\"" + host.Ruta_disco_multi + "\""
 	enviarComandoSSH(host.Ip, sattachCommand, config)
 
 	//Comando para asignar las unidades de procesamiento
-	cpuCommand := "VBoxManage modifyvm " + specs.Name + " --cpus " + strconv.Itoa(specs.CPU)
+	cpuCommand := "VBoxManage modifyvm " + specs.Nombre + " --cpus " + strconv.Itoa(specs.Cpu)
 	enviarComandoSSH(host.Ip, cpuCommand, config)
 
 	//comando para poner el adaptador de red en modo puente (Bridge)
-	redAdapterCommand := "VBoxManage modifyvm " + specs.Name + " --nic1 bridged --bridgeadapter1 " + "\"" + host.Adaptador_red + "\""
+	redAdapterCommand := "VBoxManage modifyvm " + specs.Nombre + " --nic1 bridged --bridgeadapter1 " + "\"" + host.Adaptador_red + "\""
 	enviarComandoSSH(host.Ip, redAdapterCommand, config)
 
 	lines := strings.Split(string(uuid), "\n")
@@ -640,17 +641,20 @@ func crateVM(specs Specifications, config *ssh.ClientConfig) {
 
 	nuevaMaquinaVirtual := Maquina_virtual{
 		Uuid:              uuid,
-		Nombre:            specs.Name,
-		Sistema_operativo: specs.OSType,
-		Memoria:           specs.Memory,
-		Cpu:               specs.CPU,
-		Estado:            "Apagada",
+		Nombre:            specs.Nombre,
+		Sistema_operativo: specs.Sistema_operativo,
+		Memoria:           specs.Memoria,
+		Cpu:               specs.Cpu,
+		Estado:            "Apagado",
 		Hostname:          "uqcloud",
+		Persona_email:     specs.Persona_email,
 	}
+
+	fmt.Println(specs)
 
 	_, err := db.Exec("INSERT INTO maquina_virtual (uuid, nombre, sistema_operativo, memoria, cpu, estado,persona_email, host_id, hostname, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		nuevaMaquinaVirtual.Uuid, nuevaMaquinaVirtual.Nombre, nuevaMaquinaVirtual.Sistema_operativo, nuevaMaquinaVirtual.Memoria,
-		nuevaMaquinaVirtual.Cpu, nuevaMaquinaVirtual.Estado, "jslopezd@uqvirtual.edu.co", host.Id, nuevaMaquinaVirtual.Hostname, nuevaMaquinaVirtual.Ip)
+		nuevaMaquinaVirtual.Cpu, nuevaMaquinaVirtual.Estado, nuevaMaquinaVirtual.Persona_email, host.Id, nuevaMaquinaVirtual.Hostname, nuevaMaquinaVirtual.Ip)
 
 	if err != nil {
 		log.Fatal(err)
@@ -695,27 +699,27 @@ si la màquina esta encendida o apagada. En caso de que estè encendida, invoca 
 @hostIP Paràmetro que contiene la direcciòn ip del host en el cual està alojada la màquina virtual a modificar
 */
 
-func modifyVM(specs Specifications, hostIP string, config *ssh.ClientConfig) string {
+func modifyVM(specs Maquina_virtual, hostIP string, config *ssh.ClientConfig) string {
 
 	//Comando para modificar la memoria RAM a la MV
-	memoryCommand := "VBoxManage modifyvm " + specs.Name + " --memory " + strconv.Itoa(specs.Memory)
+	memoryCommand := "VBoxManage modifyvm " + specs.Nombre + " --memory " + strconv.Itoa(specs.Memoria)
 
 	//Comando para modificar las unidades de procesamiento
-	cpuCommand := "VBoxManage modifyvm " + specs.Name + " --cpus " + strconv.Itoa(specs.CPU)
+	cpuCommand := "VBoxManage modifyvm " + specs.Nombre + " --cpus " + strconv.Itoa(specs.Cpu)
 
 	//Variable que contiene el estado de la MV (Encendida o apagada)
-	running := isRunning(specs.Name, hostIP, config)
+	running := isRunning(specs.Nombre, hostIP, config)
 
 	if running {
 		return "Para modificar la màquina primero debe apagarla"
 
 	}
 
-	if specs.CPU != 0 {
+	if specs.Cpu != 0 {
 		enviarComandoSSH(hostIP, cpuCommand, config)
 	}
 
-	if specs.Memory != 0 {
+	if specs.Memoria != 0 {
 		enviarComandoSSH(hostIP, memoryCommand, config)
 	}
 
@@ -800,7 +804,7 @@ func checkManagementQueueChanges() {
 					return
 				}
 
-				var specifications Specifications
+				var specifications Maquina_virtual
 				err = json.Unmarshal(specsJSON, &specifications)
 				if err != nil {
 					fmt.Println("Error al deserializar las especificaciones:", err)
@@ -856,17 +860,17 @@ para que el usuario de la màquina fìsica no se vea afectado
 @return Retorna la direcciòn Ip de la màquina virtual
 */
 
-func startVM(specs Specifications, hostIP string, config *ssh.ClientConfig) string {
+func startVM(specs Maquina_virtual, hostIP string, config *ssh.ClientConfig) string {
 
 	// Comando para encender la máquina virtual
-	startVMCommand := "VBoxManage startvm " + specs.Name + " --type headless"
+	startVMCommand := "VBoxManage startvm " + specs.Nombre + " --type headless"
 	enviarComandoSSH(hostIP, startVMCommand, config)
 
 	// Espera 10 segundos para que la máquina virtual inicie
 	time.Sleep(10 * time.Second)
 
 	// Obtiene la dirección IP de la máquina virtual después de que se inicie
-	getIpCommand := "VBoxManage guestproperty get " + specs.Name + " /VirtualBox/GuestInfo/Net/0/V4/IP"
+	getIpCommand := "VBoxManage guestproperty get " + specs.Nombre + " /VirtualBox/GuestInfo/Net/0/V4/IP"
 	var ipAddress string
 
 	for ipAddress == "" || ipAddress == "No value set!" {
