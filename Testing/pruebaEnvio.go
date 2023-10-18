@@ -109,8 +109,8 @@ func enviarMensaje() {
 	}
 
 	// URL del servidor al que enviaremos el mensaje.
-	//serverURL := "http://localhost:8081/json/specifications"
-	serverURL := "http://localhost:8081/json/modifyVM"
+	serverURL := "http://localhost:8081/json/specifications"
+	//serverURL := "http://localhost:8081/json/modifyVM"
 
 	// Enviamos el mensaje JSON al servidor mediante una solicitud POST.
 	resp, err := http.Post(serverURL, "application/json", bytes.NewBuffer(messageJSON))
