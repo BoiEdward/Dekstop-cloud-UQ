@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,12 +56,21 @@ type SpecificationsQueue struct {
 	Queue *list.List
 }
 
-// Cola de especificaciones para la modificaciòn de màquinas virtuales
-type ModifyQueue struct {
+// Cola de especificaciones para la gestiòn de màquinas virtuales
+// La gestiòn puede ser: modificar, eliminar, iniciar, detener una MV.
+type ManagementQueue struct {
 	sync.Mutex
 	Queue *list.List
 }
 
+/*
+Estrucutura de datos tipo JSON que contiene los campos necesarios para la gestiòn de usuarios
+@Nombre Representa el nombre del usuario
+@Apellido Representa el apellido del usuario
+@Email Representa el email del usuario
+@Usuario Representa el usuario de la cuenta con el cual puede iniciar sesiìn
+@Contrasenia Representa la contraseña de la cuenta
+*/
 type Persona struct {
 	Nombre      string
 	Apellido    string
@@ -69,6 +79,17 @@ type Persona struct {
 	Contrasenia string
 }
 
+/*
+Estructura de datos tipo JSOn que contiene los datos de una màquina virtual
+@Uuid Representa el uuid de una màqina virtual, el cual es un identificador ùnico
+@Nombre Representa el nombre de la MV
+@Sistema_operativo Representa el tipo de sistema operativo
+@Memoria Representa la cantidad de memoria RAM de la MV
+@Cpu Representa la cantidad de unidades de procesamiento de la MV
+@Estado Representa el estado de la MV (Apagada, Encendida)
+@Hostname Representa el nombre del host de la MV
+@Ip Representa la direcciòn Ip de la MV
+*/
 type Maquina_virtual struct {
 	Uuid              string
 	Nombre            string
@@ -80,6 +101,22 @@ type Maquina_virtual struct {
 	Ip                string
 }
 
+/*
+Estructura de datos tipo JSON que contiene los campos de un host
+@Id Representa el identificador ùnico del host
+@Nombre Representa el nombre del host
+@Mac Representa la direcciòn fìsica del host
+@Memoria Representa la cantidad de memoria RAM que tiene el host
+@Cpu Representa la cantidad de unidades de procesamiento que tiene el host
+@Adaptador_red Representa el nombre del adaptador de red
+@Almacenamiento_total Representa el total de espacio de almacenamiento que tiene el host
+@Estado Representa el estado del host (Disponible Fuera de servicio)
+@Sistema_operativo Representa el tipo de sistema operativo del host
+@Ruta_disco_multi Representa la ubiaciòn del disco multiconexiòn
+@Ruta_llave_ssh Representa la ubiaciòn de la llave ssh pùblica
+@Hostname Representa el nombre del host
+@Ip Representa la direcciòn Ip del host
+*/
 type Host struct {
 	Id                   int
 	Nombre               string
@@ -96,6 +133,13 @@ type Host struct {
 	Ip                   string
 }
 
+/*
+Estructura de datos tipo JSON que contiene los campos para representar una MV del catàlogo
+@Nombre Representa el nombre de la MV
+@Memoria Representa la cantidad de memoria RAM de la MV
+@Cpu Representa la cantidad de unidades de procesamiento de la MV
+@Sistema_operativo Representa el tipo de sistema operativo de la Mv
+*/
 type Catalogo struct {
 	Nombre            string
 	Memoria           int
@@ -106,7 +150,7 @@ type Catalogo struct {
 // Declaraciòn de variables globales
 var (
 	specificationsQueue SpecificationsQueue
-	modifyQueue         ModifyQueue
+	managementQueue     ManagementQueue
 	mu                  sync.Mutex
 	lastQueueSize       int
 )
@@ -131,7 +175,7 @@ func main() {
 	go checkSpecificationsQueueChanges()
 
 	// Función que verifica la cola de cuentas constantemente.
-	go checkModifyQueueChanges()
+	go checkManagementQueueChanges()
 
 	// Inicia el servidor HTTP en el puerto 8081.
 	fmt.Println("Servidor escuchando en el puerto 8081...")
@@ -150,7 +194,6 @@ func manageSqlConecction() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	//defer db.Close()
 
 }
 
@@ -161,7 +204,7 @@ Si la peticiòn es de inicio de sesiòn, la gestiona inmediatamente.
 */
 func manageServer() {
 	specificationsQueue.Queue = list.New()
-	modifyQueue.Queue = list.New()
+	managementQueue.Queue = list.New()
 
 	//Endpoint para las peticiones de creaciòn de màquinas virtuales
 	http.HandleFunc("/json/specifications", func(w http.ResponseWriter, r *http.Request) {
@@ -240,17 +283,31 @@ func manageServer() {
 			return
 		}
 
-		// Decodifica el JSON recibido en la solicitud en una estructura Specifications.
-		var specifications Specifications
+		// Decodifica el JSON recibido en la solicitud en un mapa genérico.
+		var payload map[string]interface{}
 		decoder := json.NewDecoder(r.Body)
-		if err := decoder.Decode(&specifications); err != nil {
-			http.Error(w, "Error al decodificar JSON de especificaciones", http.StatusBadRequest)
+		if err := decoder.Decode(&payload); err != nil {
+			http.Error(w, "Error al decodificar JSON de la solicitud", http.StatusBadRequest)
 			return
 		}
 
-		// Encola las especificaciones.
+		// Verifica que el campo "tipo_solicitud" esté presente y sea "modify".
+		tipoSolicitud, isPresent := payload["tipo_solicitud"].(string)
+		if !isPresent || tipoSolicitud != "modify" {
+			http.Error(w, "El campo 'tipo_solicitud' debe ser 'modify'", http.StatusBadRequest)
+			return
+		}
+
+		// Extrae el objeto "specifications" del JSON.
+		specificationsData, isPresent := payload["specifications"].(map[string]interface{})
+		if !isPresent || specificationsData == nil {
+			http.Error(w, "El campo 'specifications' es inválido", http.StatusBadRequest)
+			return
+		}
+
+		// Encola las peticiones.
 		mu.Lock()
-		modifyQueue.Queue.PushBack(specifications)
+		managementQueue.Queue.PushBack(payload)
 		mu.Unlock()
 
 		// Envía una respuesta al cliente.
@@ -258,6 +315,50 @@ func manageServer() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
+	})
+
+	//End point para eliminar màquinas virtuales
+	http.HandleFunc("/json/deleteVM", func(w http.ResponseWriter, r *http.Request) {
+		// Verifica que la solicitud sea del método POST.
+		if r.Method != http.MethodPost {
+			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var datos map[string]interface{}
+
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&datos); err != nil {
+			http.Error(w, "Error al decodificar JSON de especificaciones", http.StatusBadRequest)
+			return
+		}
+
+		// Verificar si el nombre de la máquina virtual, la IP del host y el tipo de solicitud están presentes y no son nulos
+		nombre, nombrePresente := datos["nombre"].(string)
+		ipHost, ipPresente := datos["ip"].(string)
+		tipoSolicitud, tipoPresente := datos["tipo_solicitud"].(string)
+
+		if !tipoPresente || tipoSolicitud != "delete" {
+			http.Error(w, "El campo 'tipo_solicitud' debe ser 'delete'", http.StatusBadRequest)
+			return
+		}
+
+		if !nombrePresente || !ipPresente || tipoPresente || nombre == "" || ipHost == "" || tipoSolicitud == "" {
+			http.Error(w, "El tipo de solicitud, nombre de la máquina virtual y la IP del host son obligatorios", http.StatusBadRequest)
+			return
+		}
+
+		// Encola las peticiones.
+		mu.Lock()
+		managementQueue.Queue.PushBack(datos)
+		mu.Unlock()
+
+		// Envía una respuesta al cliente.
+		response := map[string]string{"mensaje": "Mensaje JSON para eliminar MV recibido correctamente"}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+
 	})
 
 }
@@ -412,7 +513,7 @@ func crateVM(specs Specifications, config *ssh.ClientConfig) {
 
 	//Comando para crear una màquina virtual
 	createVM := "VBoxManage createvm --name " + specs.Name + " --ostype " + specs.OSType + " --register"
-	enviarComandoSSH(host.Ip, createVM, config)
+	uuid := enviarComandoSSH(host.Ip, createVM, config)
 
 	//Comando para asignar la memoria RAM a la MV
 	memoryCommand := "VBoxManage modifyvm " + specs.Name + " --memory " + strconv.Itoa(specs.Memory)
@@ -434,6 +535,31 @@ func crateVM(specs Specifications, config *ssh.ClientConfig) {
 	//comando para poner el adaptador de red en modo puente (Bridge)
 	redAdapterCommand := "VBoxManage modifyvm " + specs.Name + " --nic1 bridged --bridgeadapter1 " + "\"" + host.Adaptador_red + "\""
 	enviarComandoSSH(host.Ip, redAdapterCommand, config)
+
+	lines := strings.Split(string(uuid), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "UUID:") {
+			uuid = strings.TrimPrefix(line, "UUID:")
+		}
+	}
+
+	nuevaMaquinaVirtual := Maquina_virtual{
+		Uuid:              uuid,
+		Nombre:            specs.Name,
+		Sistema_operativo: specs.OSType,
+		Memoria:           specs.Memory,
+		Cpu:               specs.CPU,
+		Estado:            "Apagada",
+		Hostname:          "uqcloud",
+	}
+
+	_, err := db.Exec("INSERT INTO maquina_virtual (uuid, nombre, sistema_operativo, memoria, cpu, estado,persona_email, host_id, hostname, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		nuevaMaquinaVirtual.Uuid, nuevaMaquinaVirtual.Nombre, nuevaMaquinaVirtual.Sistema_operativo, nuevaMaquinaVirtual.Memoria,
+		nuevaMaquinaVirtual.Cpu, nuevaMaquinaVirtual.Estado, "jslopezd@uqvirtual.edu.co", host.Id, nuevaMaquinaVirtual.Hostname, nuevaMaquinaVirtual.Ip)
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Println("Màquina virtual creada con èxito")
 }
@@ -486,7 +612,7 @@ func modifyVM(specs Specifications, hostIP string, config *ssh.ClientConfig) str
 	running := isRunning(specs.Name, hostIP, config)
 
 	if running {
-		return "Debe apagar la màquina primero"
+		return "Para modificar la màquina primero debe apagarla"
 
 	}
 
@@ -536,32 +662,62 @@ func apagarMV(nameVM string, hostIP string, config *ssh.ClientConfig) {
 
 }
 
-/*Funciòn que se encarga de gestionar la cola de peticiones para la modificaciòn de màquinas virtuales
+/*Funciòn que se encarga de gestionar la cola de solicitudes para la gestiòn de màquinas virtuales
  */
-func checkModifyQueueChanges() {
+func checkManagementQueueChanges() {
 	for {
 		// Verifica si el tamaño de la cola de especificaciones ha cambiado.
 		mu.Lock()
-		currentQueueSize := modifyQueue.Queue.Len()
+		currentQueueSize := managementQueue.Queue.Len()
 		mu.Unlock()
 
 		if currentQueueSize > 0 {
 			// Imprime y elimina el primer elemento de la cola de especificaciones.
 			mu.Lock()
-			firstElement := modifyQueue.Queue.Front()
-			modifyQueue.Queue.Remove(firstElement)
-			mu.Unlock()
+			firstElement := managementQueue.Queue.Front()
 
-			// Procesa el primer elemento (en este caso, imprime las especificaciones).
+			// Verifica que el primer elemento sea un mapa.
+			data, dataPresent := firstElement.Value.(map[string]interface{})
+
+			if !dataPresent {
+				fmt.Println("No se pudo procesar la solicitud")
+				mu.Unlock()
+				return
+			}
+
 			config, err := configurarSSH("jhoiner", *privateKeyPath)
 			if err != nil {
 				log.Fatal("Error al configurar SSH:", err)
 				return
 			}
 
-			modifyVM(firstElement.Value.(Specifications), "192.168.101.10", config)
+			// Obtiene el valor del campo "tipo_solicitud"
+			tipoSolicitud, _ := data["tipo_solicitud"].(string)
 
-			printSpecifications(firstElement.Value.(Specifications), false)
+			if strings.ToLower(tipoSolicitud) == "modify" {
+				specsMap, _ := data["specifications"].(map[string]interface{})
+
+				// Convierte el mapa de especificaciones a un objeto Specifications.
+				specsJSON, err := json.Marshal(specsMap)
+				if err != nil {
+					fmt.Println("Error al serializar las especificaciones:", err)
+					mu.Unlock()
+					return
+				}
+
+				var specifications Specifications
+				err = json.Unmarshal(specsJSON, &specifications)
+				if err != nil {
+					fmt.Println("Error al deserializar las especificaciones:", err)
+					mu.Unlock()
+					return
+				}
+
+				modifyVM(specifications, "192.168.101.10", config)
+			}
+
+			managementQueue.Queue.Remove(firstElement)
+			mu.Unlock()
 		}
 
 		// Espera un segundo antes de verificar nuevamente.
@@ -569,10 +725,15 @@ func checkModifyQueueChanges() {
 	}
 }
 
+/* Funciòn que permite enviar los comandos necesarios para eliminar una màquina virtual
+@nameVM Paràmetro que contiene el nombre de la màquina virtual a eliminar
+@hostIP Paràmetro que contiene la direcciòn ip del host
+*/
+
 func deleteVM(nameVM string, hostIP string, config *ssh.ClientConfig) string {
 
 	//Comando para desconectar el disco de la MV
-	disconnectCommand := "VBoxManage storageattach " + nameVM + " --storagectl SATA --port 0 --device 0 --medium none"
+	disconnectCommand := "VBoxManage storageattach " + nameVM + " --storagectl hardisk --port 0 --device 0 --medium none"
 
 	//Comando para eliminar la MV
 	deleteCommand := "VBoxManage unregistervm " + nameVM + " --delete"
@@ -592,33 +753,41 @@ func deleteVM(nameVM string, hostIP string, config *ssh.ClientConfig) string {
 	return "Màquina eliminada correctamente"
 }
 
+/*
+Funciòn que permite iniciar una màquina virtual en modo "headless", lo que indica que se inicia en segundo plano
+para que el usuario de la màquina fìsica no se vea afectado
+@specs Contiene las especificaciones de la maquina a encender
+@hostIp Contiene la direcciòn Ip del host en el cual està alojada la MV
+@return Retorna la direcciòn Ip de la màquina virtual
+*/
+
 func startVM(specs Specifications, hostIP string, config *ssh.ClientConfig) string {
 
 	// Comando para encender la máquina virtual
 	startVMCommand := "VBoxManage startvm " + specs.Name + " --type headless"
 	enviarComandoSSH(hostIP, startVMCommand, config)
-	/*err := startCmd.Run()
-	if err != nil {
-		return "", fmt.Errorf("error al encender la máquina virtual: %v", err)
-	}*/
 
-	// Espera 10 segundos para que la máquina virtual se inicie completamente
+	// Espera 10 segundos para que la máquina virtual inicie
 	time.Sleep(10 * time.Second)
 
 	// Obtiene la dirección IP de la máquina virtual después de que se inicie
 	getIpCommand := "VBoxManage guestproperty get " + specs.Name + " /VirtualBox/GuestInfo/Net/0/V4/IP"
-	ipAddress := enviarComandoSSH(hostIP, getIpCommand, config)
-	/*ipOutput, err := ipCmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("error obteniendo la dirección IP: %v", err)
-	}*/
-	if ipAddress != "" {
-		fmt.Println("Error al obtener la direcciòn IP")
-		return ""
-	}
+	var ipAddress string
 
+	for ipAddress == "" || ipAddress == "No value set!" {
+		ipAddress = enviarComandoSSH(hostIP, getIpCommand, config)
+		if ipAddress == "No value set!" {
+			time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
+		}
+
+	}
 	return ipAddress
 }
+
+/*
+Funciòn que contiene el algoritmo de asignaciòn tipo aleatorio. Se encarga de escoger un host de la base de datos al azar
+Return Retorna el host seleccionado.
+*/
 
 func selectHost() Host {
 
@@ -634,7 +803,6 @@ func selectHost() Host {
 	randomIndex := rand.Intn(count)
 
 	// Consulta para seleccionar un registro aleatorio de la tabla "host"
-
 	var host Host
 
 	err = db.QueryRow("SELECT * FROM host LIMIT ?, 1", randomIndex).Scan(&host.Id, &host.Nombre, &host.Mac, &host.Memoria, &host.Cpu, &host.Adaptador_red, &host.Almacenamiento_total, &host.Estado, &host.Sistema_operativo, &host.Ruta_disco_multi, &host.Ruta_llave_ssh, &host.Hostname, &host.Ip)

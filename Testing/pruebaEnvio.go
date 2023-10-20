@@ -18,7 +18,8 @@ type Specifications struct {
 func main() {
 	// Inicia una goroutine para enviar mensajes JSON cada segundo.
 	//go sendMessages()
-	enviarMensaje()
+	//createTest()
+	modifyTest()
 
 	// Espera una señal de cierre (Ctrl+C) para detener el programa.
 	//<-make(chan struct{})
@@ -93,27 +94,10 @@ func main() {
 	}
 }*/
 
-func enviarMensaje() {
-	// Datos del mensaje JSON que queremos enviar al servidor.
-	message := Specifications{
-		Name:   "UqCloud",
-		OSType: "Debian",
-		Memory: 1024,
-		CPU:    2,
-	}
-
-	messageJSON, err := json.Marshal(message)
-	if err != nil {
-		fmt.Println("Error al codificar el mensaje JSON:", err)
-		return
-	}
-
-	// URL del servidor al que enviaremos el mensaje.
-	serverURL := "http://localhost:8081/json/specifications"
-	//serverURL := "http://localhost:8081/json/modifyVM"
+func enviarMensaje(message []byte, url string) {
 
 	// Enviamos el mensaje JSON al servidor mediante una solicitud POST.
-	resp, err := http.Post(serverURL, "application/json", bytes.NewBuffer(messageJSON))
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(message))
 	if err != nil {
 		fmt.Println("Error al enviar la solicitud al servidor:", err)
 		return
@@ -129,4 +113,53 @@ func enviarMensaje() {
 
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	fmt.Println("Respuesta del servidor: " + string(responseBody))
+}
+
+func createTest() {
+	// Datos del mensaje JSON que queremos enviar al servidor.
+	message := Specifications{
+		Name:   "UqCloudTest",
+		OSType: "Debian_64",
+		Memory: 2048,
+		CPU:    3,
+	}
+
+	messageJSON, err := json.Marshal(message)
+	if err != nil {
+		fmt.Println("Error al codificar el mensaje JSON:", err)
+		return
+	}
+
+	// URL del servidor al que enviaremos el mensaje.
+	serverURL := "http://localhost:8081/json/specifications"
+
+	enviarMensaje(messageJSON, serverURL)
+
+}
+
+func modifyTest() {
+	// Datos del mensaje JSON que queremos enviar al servidor.
+	message := Specifications{
+		Name:   "UqCloudTest",
+		OSType: "Debian_64",
+		Memory: 512,
+		CPU:    1,
+	}
+
+	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
+	payload := map[string]interface{}{
+		"tipo_solicitud": "modify",
+		"specifications": message,
+	}
+
+	messageJSON, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Error al codificar el mensaje JSON:", err)
+		return
+	}
+
+	// URL del servidor al que enviaremos el mensaje.
+	serverURL := "http://localhost:8081/json/modifyVM"
+
+	enviarMensaje(messageJSON, serverURL)
 }
