@@ -18,8 +18,9 @@ type Specifications struct {
 func main() {
 	// Inicia una goroutine para enviar mensajes JSON cada segundo.
 	//go sendMessages()
-	//createTest()
-	modifyTest()
+	//createVMTest()
+	//modifyVMTest()
+	deleteVMTest()
 
 	// Espera una señal de cierre (Ctrl+C) para detener el programa.
 	//<-make(chan struct{})
@@ -115,7 +116,7 @@ func enviarMensaje(message []byte, url string) {
 	fmt.Println("Respuesta del servidor: " + string(responseBody))
 }
 
-func createTest() {
+func createVMTest() {
 	// Datos del mensaje JSON que queremos enviar al servidor.
 	message := Specifications{
 		Name:   "UqCloudTest",
@@ -137,7 +138,7 @@ func createTest() {
 
 }
 
-func modifyTest() {
+func modifyVMTest() {
 	// Datos del mensaje JSON que queremos enviar al servidor.
 	message := Specifications{
 		Name:   "UqCloudTest",
@@ -160,6 +161,26 @@ func modifyTest() {
 
 	// URL del servidor al que enviaremos el mensaje.
 	serverURL := "http://localhost:8081/json/modifyVM"
+
+	enviarMensaje(messageJSON, serverURL)
+}
+
+func deleteVMTest() {
+
+	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
+	payload := map[string]interface{}{
+		"tipo_solicitud": "delete",
+		"nombreVM":       "UqCloudTest",
+	}
+
+	messageJSON, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Error al codificar el mensaje JSON:", err)
+		return
+	}
+
+	// URL del servidor al que enviaremos el mensaje.
+	serverURL := "http://localhost:8081/json/deleteVM"
 
 	enviarMensaje(messageJSON, serverURL)
 }
