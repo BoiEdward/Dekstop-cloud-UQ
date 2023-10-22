@@ -836,7 +836,7 @@ func modifyVM(specs Maquina_virtual) string {
 
 	if specs.Cpu != 0 {
 		enviarComandoSSH(host.Ip, cpuCommand, config)
-		_, err1 := db.Exec("UPDATE maquina_virtual set estado = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Cpu), specs.Nombre)
+		_, err1 := db.Exec("UPDATE maquina_virtual set cpu = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Cpu), specs.Nombre)
 		if err1 != nil {
 			fmt.Println("Error al realizar la actualizaciòn del estado", err1)
 		}

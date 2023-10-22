@@ -25,9 +25,9 @@ func main() {
 	// Inicia una goroutine para enviar mensajes JSON cada segundo.
 	//go sendMessages()
 	//createVMTest()
-	//modifyVMTest()
+	modifyVMTest()
 	//deleteVMTest()
-	startVMTest()
+	//startVMTest()
 	//stopVMTest()
 
 	// Espera una señal de cierre (Ctrl+C) para detener el programa.
@@ -152,8 +152,8 @@ func modifyVMTest() {
 	message := Maquina_virtual{
 		Nombre:            "UqCloudTest",
 		Sistema_operativo: "Debian_64",
-		Memoria:           512,
-		Cpu:               2,
+		Memoria:           2048,
+		Cpu:               4,
 		Persona_email:     "jslopezd@uqvirtual.edu.co",
 	}
 
