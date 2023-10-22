@@ -8,11 +8,17 @@ import (
 	"net/http"
 )
 
-type Specifications struct {
-	Name   string `json:"nombre"`
-	OSType string `json:"tipoSO"`
-	Memory int    `json:"memoria"`
-	CPU    int    `json:"cpu"`
+type Maquina_virtual struct {
+	Uuid              string
+	Nombre            string
+	Sistema_operativo string
+	Memoria           int
+	Cpu               int
+	Estado            string
+	Hostname          string
+	Ip                string
+	Persona_email     string
+	Host_id           string
 }
 
 func main() {
@@ -21,6 +27,7 @@ func main() {
 	//createVMTest()
 	//modifyVMTest()
 	deleteVMTest()
+	//startVMTest()
 
 	// Espera una señal de cierre (Ctrl+C) para detener el programa.
 	//<-make(chan struct{})
@@ -118,11 +125,12 @@ func enviarMensaje(message []byte, url string) {
 
 func createVMTest() {
 	// Datos del mensaje JSON que queremos enviar al servidor.
-	message := Specifications{
-		Name:   "UqCloudTest",
-		OSType: "Debian_64",
-		Memory: 2048,
-		CPU:    3,
+	message := Maquina_virtual{
+		Nombre:            "UqCloudTest3",
+		Sistema_operativo: "Debian_64",
+		Memoria:           2048,
+		Cpu:               3,
+		Persona_email:     "jslopezd@uqvirtual.edu.co",
 	}
 
 	messageJSON, err := json.Marshal(message)
@@ -132,7 +140,7 @@ func createVMTest() {
 	}
 
 	// URL del servidor al que enviaremos el mensaje.
-	serverURL := "http://localhost:8081/json/specifications"
+	serverURL := "http://localhost:8081/json/createVirtualMachine"
 
 	enviarMensaje(messageJSON, serverURL)
 
@@ -140,11 +148,12 @@ func createVMTest() {
 
 func modifyVMTest() {
 	// Datos del mensaje JSON que queremos enviar al servidor.
-	message := Specifications{
-		Name:   "UqCloudTest",
-		OSType: "Debian_64",
-		Memory: 512,
-		CPU:    1,
+	message := Maquina_virtual{
+		Nombre:            "UqCloudTest1",
+		Sistema_operativo: "Debian_64",
+		Memoria:           512,
+		Cpu:               2,
+		Persona_email:     "jslopezd@uqvirtual.edu.co",
 	}
 
 	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
@@ -170,7 +179,7 @@ func deleteVMTest() {
 	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
 	payload := map[string]interface{}{
 		"tipo_solicitud": "delete",
-		"nombreVM":       "UqCloudTest",
+		"nombreVM":       "UqCloudTest1",
 	}
 
 	messageJSON, err := json.Marshal(payload)
@@ -181,6 +190,26 @@ func deleteVMTest() {
 
 	// URL del servidor al que enviaremos el mensaje.
 	serverURL := "http://localhost:8081/json/deleteVM"
+
+	enviarMensaje(messageJSON, serverURL)
+}
+
+func startVMTest() {
+
+	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
+	payload := map[string]interface{}{
+		"tipo_solicitud": "start",
+		"nombreVM":       "UqCloudTest1",
+	}
+
+	messageJSON, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Error al codificar el mensaje JSON:", err)
+		return
+	}
+
+	// URL del servidor al que enviaremos el mensaje.
+	serverURL := "http://localhost:8081/json/startVM"
 
 	enviarMensaje(messageJSON, serverURL)
 }
