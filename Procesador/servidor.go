@@ -317,9 +317,7 @@ func manageServer() {
 			return
 		}
 
-		printAccount(persona)
-
-		query := "SELECT nombre, sistema_operativo, estado FROM maquina_virtual WHERE persona_email = ?"
+		query := "SELECT nombre, sistema_operativo, memoria, ip, estado FROM maquina_virtual WHERE persona_email = ?"
 		rows, err := db.Query(query, persona.Email)
 		if err != nil {
 			// Manejar el error
@@ -330,7 +328,7 @@ func manageServer() {
 		var machines []Maquina_virtual
 		for rows.Next() {
 			var machine Maquina_virtual
-			if err := rows.Scan(&machine.Nombre, &machine.Sistema_operativo, &machine.Estado); err != nil {
+			if err := rows.Scan(&machine.Nombre, &machine.Sistema_operativo, &machine.Memoria, &machine.Ip, &machine.Estado); err != nil {
 				// Manejar el error al escanear la fila
 				continue
 			}
