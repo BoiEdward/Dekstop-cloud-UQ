@@ -949,6 +949,8 @@ func startVM(nameVM string) string {
 		fmt.Println("Error al configurar SSH:", err)
 	}
 
+	fmt.Println("Encendiendo la màquina " + nameVM + "...")
+
 	// Comando para encender la máquina virtual
 	startVMCommand := "VBoxManage startvm " + nameVM + " --type headless"
 	enviarComandoSSH(host.Ip, startVMCommand, config)
@@ -964,18 +966,21 @@ func startVM(nameVM string) string {
 	for ipAddress == "" || ipAddress == "No value set!" {
 		ipAddress = strings.TrimSpace(enviarComandoSSH(host.Ip, getIpCommand, config))
 		if ipAddress == "No value set!" {
-			fmt.Println("Obteniendo direcciòn IP...")
 			time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
-
+			fmt.Println("Obteniendo direcciòn IP...")
 		}
 
 	}
 
-	err1 := db.QueryRow("UPDATE maquina_virtual set estado = 'Encendido' WHERE NOMBRE = ?", nameVM)
+	//Almacena solo el valor de la IP quitàndole el texto "Value:"
+	ipAddress = strings.TrimPrefix(ipAddress, "Value:")
+	ipAddress = strings.TrimSpace(ipAddress)
+
+	_, err1 := db.Exec("UPDATE maquina_virtual set estado = 'Encendido' WHERE NOMBRE = ?", nameVM)
 	if err1 != nil {
 		fmt.Println("Error al realizar la actualizaciòn del estado", err1)
 	}
-	err2 := db.QueryRow("UPDATE maquina_virtual set estado = 'Encendido' WHERE NOMBRE = ?", nameVM)
+	_, err2 := db.Exec("UPDATE maquina_virtual set ip = ? WHERE NOMBRE = ?", ipAddress, nameVM)
 	if err2 != nil {
 		fmt.Println("Error al realizar la actualizaciòn de la ip", err2)
 	}
