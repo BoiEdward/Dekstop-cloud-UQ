@@ -441,7 +441,7 @@ func manageServer() {
 	})
 
 	//------------------------------------------------------------------------------------------------------------
-	//End point para eliminar màquinas virtuales
+	//End point para encender màquinas virtuales
 	http.HandleFunc("/json/startVM", func(w http.ResponseWriter, r *http.Request) {
 		// Verifica que la solicitud sea del método POST.
 		if r.Method != http.MethodPost {
@@ -485,6 +485,50 @@ func manageServer() {
 
 	})
 
+	//End point para apagar màquinas virtuales
+	http.HandleFunc("/json/stopVM", func(w http.ResponseWriter, r *http.Request) {
+		// Verifica que la solicitud sea del método POST.
+		if r.Method != http.MethodPost {
+			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var datos map[string]interface{}
+
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&datos); err != nil {
+			http.Error(w, "Error al decodificar JSON de especificaciones", http.StatusBadRequest)
+			return
+		}
+
+		// Verificar si el nombre de la máquina virtual, la IP del host y el tipo de solicitud están presentes y no son nulos
+		nombreVM, nombrePresente := datos["nombreVM"].(string)
+
+		tipoSolicitud, tipoPresente := datos["tipo_solicitud"].(string)
+
+		if !tipoPresente || tipoSolicitud != "stop" {
+			http.Error(w, "El campo 'tipo_solicitud' debe ser 'stop'", http.StatusBadRequest)
+			return
+		}
+
+		if !nombrePresente || !tipoPresente || nombreVM == "" || tipoSolicitud == "" {
+			http.Error(w, "El tipo de solicitud y nombre de la máquina virtual son obligatorios", http.StatusBadRequest)
+			return
+		}
+
+		// Encola las peticiones.
+		mu.Lock()
+		managementQueue.Queue.PushBack(datos)
+		mu.Unlock()
+
+		// Envía una respuesta al cliente.
+		response := map[string]string{"mensaje": "Mensaje JSON para apagar MV recibido correctamente"}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+
+	})
+
 }
 
 func checkMaquinasVirtualesQueueChanges() {
@@ -501,14 +545,7 @@ func checkMaquinasVirtualesQueueChanges() {
 			maquina_virtualesQueue.Queue.Remove(firstElement)
 			mu.Unlock()
 
-			// Procesa el primer elemento (en este caso, imprime las especificaciones).
-			config, err := configurarSSH("Jhoiner", *privateKeyPath)
-			if err != nil {
-				log.Fatal("Error al configurar SSH:", err)
-				return
-			}
-
-			crateVM(firstElement.Value.(Maquina_virtual), config) //En el segundo argumento debe ir la ip del host en el cual se va a crear la VM
+			crateVM(firstElement.Value.(Maquina_virtual)) //En el segundo argumento debe ir la ip del host en el cual se va a crear la VM
 
 			printMaquinaVirtual(firstElement.Value.(Maquina_virtual), true)
 		}
@@ -646,10 +683,17 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 @hostIP Paràmetro que contiene la direcciòn IP del host--------------------------------------
 @config Paràmetro que contiene la configuraciòn de la conexiòn SSH con el host
 */
-func crateVM(specs Maquina_virtual, config *ssh.ClientConfig) {
+func crateVM(specs Maquina_virtual) {
 
 	//Selecciona un host al azar
 	host := selectHost()
+
+	// Procesa el primer elemento (en este caso, imprime las especificaciones).
+	config, err := configurarSSH(host.Hostname, *privateKeyPath)
+	if err != nil {
+		log.Fatal("Error al configurar SSH:", err)
+		return
+	}
 
 	//Comando para crear una màquina virtual
 	createVM := "VBoxManage createvm --name " + specs.Nombre + " --ostype " + specs.Sistema_operativo + " --register"
@@ -695,11 +739,11 @@ func crateVM(specs Maquina_virtual, config *ssh.ClientConfig) {
 
 	fmt.Println(specs)
 
-	_, err := db.Exec("INSERT INTO maquina_virtual (uuid, nombre, sistema_operativo, memoria, cpu, estado,persona_email, host_id, hostname, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	_, err1 := db.Exec("INSERT INTO maquina_virtual (uuid, nombre, sistema_operativo, memoria, cpu, estado,persona_email, host_id, hostname, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		nuevaMaquinaVirtual.Uuid, nuevaMaquinaVirtual.Nombre, nuevaMaquinaVirtual.Sistema_operativo, nuevaMaquinaVirtual.Memoria,
 		nuevaMaquinaVirtual.Cpu, nuevaMaquinaVirtual.Estado, nuevaMaquinaVirtual.Persona_email, host.Id, nuevaMaquinaVirtual.Hostname, nuevaMaquinaVirtual.Ip)
 
-	if err != nil {
+	if err1 != nil {
 		log.Fatal(err)
 	}
 
@@ -775,7 +819,18 @@ func modifyVM(specs Maquina_virtual, hostIP string, config *ssh.ClientConfig) st
 @hostIP Paràmetro que contiene la direcciòn ip del host
 */
 
-func apagarMV(nameVM string, hostIP string, config *ssh.ClientConfig) {
+func apagarMV(nameVM string) {
+
+	//Obtiene el objeto "maquina_virtual"
+	maquinaVirtual := getVM(nameVM)
+
+	//Obtiene el host en el cual està alojada la MV
+	host := getHost(maquinaVirtual.Host_id)
+
+	config, err := configurarSSH(host.Hostname, *privateKeyPath)
+	if err != nil {
+		fmt.Println("Error al configurar SSH:", err)
+	}
 
 	//Comando para enviar señal de apagado a la MV esperando que los programas cierren correctamente
 	acpiCommand := "VBoxManage controlvm " + nameVM + " acpipowerbutton"
@@ -783,14 +838,16 @@ func apagarMV(nameVM string, hostIP string, config *ssh.ClientConfig) {
 	//Comando para apagar la màquina sin esperar que los programas cierren
 	powerOffCommand := "VBoxManage controlvm " + nameVM + " poweroff"
 
-	enviarComandoSSH(hostIP, acpiCommand, config)
+	fmt.Println("Apagando màquina " + nameVM + "...")
+
+	enviarComandoSSH(host.Ip, acpiCommand, config)
 
 	// Establece un temporizador de espera máximo de 5 minutos
 	maxEspera := time.Now().Add(5 * time.Minute)
 
 	// Espera hasta que la máquina esté apagada o haya pasado el tiempo máximo de espera
 	for time.Now().Before(maxEspera) {
-		if !isRunning(nameVM, hostIP, config) {
+		if !isRunning(nameVM, host.Ip, config) {
 			break
 		}
 
@@ -798,9 +855,15 @@ func apagarMV(nameVM string, hostIP string, config *ssh.ClientConfig) {
 		time.Sleep(5 * time.Second)
 	}
 
-	if isRunning(nameVM, hostIP, config) {
-		enviarComandoSSH(hostIP, powerOffCommand, config)
+	if isRunning(nameVM, host.Ip, config) {
+		enviarComandoSSH(host.Ip, powerOffCommand, config)
 	}
+	_, err1 := db.Exec("UPDATE maquina_virtual set estado = 'Apagado' WHERE NOMBRE = ?", nameVM)
+	if err1 != nil {
+		fmt.Println("Error al realizar la actualizaciòn del estado", err1)
+	}
+
+	fmt.Println("Màquina apagada con èxito")
 
 }
 
@@ -873,6 +936,14 @@ func checkManagementQueueChanges() {
 				nameVM, _ := data["nombreVM"].(string)
 
 				startVM(nameVM)
+			}
+
+			if strings.ToLower(tipoSolicitud) == "stop" {
+
+				// Obtiene el valor del campo "tipo_solicitud"
+				nameVM, _ := data["nombreVM"].(string)
+
+				apagarMV(nameVM)
 			}
 
 			managementQueue.Queue.Remove(firstElement)
@@ -1066,4 +1137,20 @@ func getVM(nameVM string) Maquina_virtual {
 	}
 
 	return maquinaVirtual
+}
+
+func getUser(email string) Persona {
+
+	var persona Persona
+	err := db.QueryRow("SELECT * FROM persona WHERE email = ?", email).Scan(&persona.Email, &persona.Nombre, &persona.Apellido, &persona.Contrasenia)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			fmt.Println("No se encontrò un usuario con el email especificado")
+		} else {
+			log.Fatal(err)
+		}
+	}
+
+	return persona
+
 }

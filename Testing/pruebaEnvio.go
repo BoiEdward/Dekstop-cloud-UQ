@@ -26,8 +26,9 @@ func main() {
 	//go sendMessages()
 	//createVMTest()
 	//modifyVMTest()
-	//deleteVMTest()
-	startVMTest()
+	deleteVMTest()
+	//startVMTest()
+	//stopVMTest()
 
 	// Espera una señal de cierre (Ctrl+C) para detener el programa.
 	//<-make(chan struct{})
@@ -210,6 +211,26 @@ func startVMTest() {
 
 	// URL del servidor al que enviaremos el mensaje.
 	serverURL := "http://localhost:8081/json/startVM"
+
+	enviarMensaje(messageJSON, serverURL)
+}
+
+func stopVMTest() {
+
+	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
+	payload := map[string]interface{}{
+		"tipo_solicitud": "stop",
+		"nombreVM":       "UqCloudTest",
+	}
+
+	messageJSON, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Println("Error al codificar el mensaje JSON:", err)
+		return
+	}
+
+	// URL del servidor al que enviaremos el mensaje.
+	serverURL := "http://localhost:8081/json/stopVM"
 
 	enviarMensaje(messageJSON, serverURL)
 }
