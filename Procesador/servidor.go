@@ -837,18 +837,28 @@ func modifyVM(specs Maquina_virtual) string {
 	}
 
 	if specs.Cpu != 0 {
-		enviarComandoSSH(host.Ip, cpuCommand, config)
+		_, err11 := enviarComandoSSH(host.Ip, cpuCommand, config)
+		if err11 != nil {
+			log.Println("Error al realizar la actualizaciòn de la cpu", err11)
+			return "Error al realizar la actualizaciòn de la cpu"
+		}
 		_, err1 := db.Exec("UPDATE maquina_virtual set cpu = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Cpu), specs.Nombre)
 		if err1 != nil {
-			fmt.Println("Error al realizar la actualizaciòn del estado", err1)
+			log.Println("Error al realizar la actualizaciòn de la cpu", err1)
+			return "Error al realizar la actualizaciòn de la cpu"
 		}
 	}
 
 	if specs.Memoria != 0 {
-		enviarComandoSSH(host.Ip, memoryCommand, config)
+		_, err22 := enviarComandoSSH(host.Ip, memoryCommand, config)
+		if err22 != nil {
+			log.Println("Error al realizar la actualizaciòn de la memoria", err22)
+			return "Error al realizar la actualizaciòn de la memoria"
+		}
 		_, err2 := db.Exec("UPDATE maquina_virtual set memoria = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Memoria), specs.Nombre)
 		if err2 != nil {
-			fmt.Println("Error al realizar la actualizaciòn de la ip", err2)
+			log.Println("Error al realizar la actualizaciòn de la memoria en la base de datos", err2)
+			return "Error al realizar la actualizaciòn de la memoria en la base de datos"
 		}
 	}
 

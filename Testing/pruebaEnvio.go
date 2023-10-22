@@ -153,7 +153,7 @@ func modifyVMTest() {
 		Nombre:            "UqCloudTest",
 		Sistema_operativo: "Debian_64",
 		Memoria:           2048,
-		Cpu:               4,
+		Cpu:               2,
 		Persona_email:     "jslopezd@uqvirtual.edu.co",
 	}
 
