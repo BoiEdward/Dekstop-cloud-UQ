@@ -317,7 +317,7 @@ func manageServer() {
 			return
 		}
 
-		query := "SELECT nombre, sistema_operativo, memoria, ip, estado FROM maquina_virtual WHERE persona_email = ?"
+		query := "SELECT nombre, sistema_operativo, memoria, cpu, ip, estado FROM maquina_virtual WHERE persona_email = ?"
 		rows, err := db.Query(query, persona.Email)
 		if err != nil {
 			// Manejar el error
@@ -328,7 +328,7 @@ func manageServer() {
 		var machines []Maquina_virtual
 		for rows.Next() {
 			var machine Maquina_virtual
-			if err := rows.Scan(&machine.Nombre, &machine.Sistema_operativo, &machine.Memoria, &machine.Ip, &machine.Estado); err != nil {
+			if err := rows.Scan(&machine.Nombre, &machine.Sistema_operativo, &machine.Memoria, &machine.Cpu, &machine.Ip, &machine.Estado); err != nil {
 				// Manejar el error al escanear la fila
 				continue
 			}
@@ -367,6 +367,8 @@ func manageServer() {
 			http.Error(w, "Error al decodificar JSON de la solicitud", http.StatusBadRequest)
 			return
 		}
+
+		fmt.Println(payload)
 
 		// Verifica que el campo "tipo_solicitud" esté presente y sea "modify".
 		tipoSolicitud, isPresent := payload["tipo_solicitud"].(string)
@@ -836,7 +838,7 @@ func modifyVM(specs Maquina_virtual) string {
 
 	if specs.Cpu != 0 {
 		enviarComandoSSH(host.Ip, cpuCommand, config)
-		_, err1 := db.Exec("UPDATE maquina_virtual set estado = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Cpu), specs.Nombre)
+		_, err1 := db.Exec("UPDATE maquina_virtual set cpu = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Cpu), specs.Nombre)
 		if err1 != nil {
 			fmt.Println("Error al realizar la actualizaciòn del estado", err1)
 		}
