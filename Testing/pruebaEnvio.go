@@ -26,8 +26,8 @@ func main() {
 	//go sendMessages()
 	//createVMTest()
 	//modifyVMTest()
-	deleteVMTest()
-	//startVMTest()
+	//deleteVMTest()
+	startVMTest()
 	//stopVMTest()
 
 	// Espera una señal de cierre (Ctrl+C) para detener el programa.

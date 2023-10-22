@@ -1101,20 +1101,25 @@ func startVM(nameVM string) string {
 		// Obtiene la dirección IP de la máquina virtual después de que se inicie
 		getIpCommand := "VBoxManage guestproperty get " + nameVM + " /VirtualBox/GuestInfo/Net/0/V4/IP"
 		var ipAddress string
+		ipAddress, err2 := enviarComandoSSH(host.Ip, getIpCommand, config)
+		if err2 != nil {
+			log.Println("Error al obtener la IP de la MV:", err2)
+			return "Error al obtener la IP de la MV"
+		}
+		ipAddress = strings.TrimSpace(ipAddress)
 
 		for ipAddress == "" || ipAddress == "No value set!" {
-			ipAddress, err2 := enviarComandoSSH(host.Ip, getIpCommand, config)
-			if err2 != nil {
-				log.Println("Error al obtener la IP de la MV:", err2)
-				return "Error al obtner la Ip de la MV"
-			}
-			ipAddress = strings.TrimSpace(ipAddress)
 
 			if ipAddress == "No value set!" {
 				time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
-				fmt.Println("Obteniendo direcciòn IP...")
+				fmt.Println("Obteniendo dirección IP...")
 			}
-
+			ipAddress, err2 = enviarComandoSSH(host.Ip, getIpCommand, config)
+			if err2 != nil {
+				log.Println("Error al obtener la IP de la MV:", err2)
+				return "Error al obtener la IP de la MV"
+			}
+			ipAddress = strings.TrimSpace(ipAddress)
 		}
 
 		//Almacena solo el valor de la IP quitàndole el texto "Value:"
@@ -1125,9 +1130,9 @@ func startVM(nameVM string) string {
 		if err1 != nil {
 			fmt.Println("Error al realizar la actualizaciòn del estado", err1)
 		}
-		_, err2 := db.Exec("UPDATE maquina_virtual set ip = ? WHERE NOMBRE = ?", ipAddress, nameVM)
-		if err2 != nil {
-			fmt.Println("Error al realizar la actualizaciòn de la ip", err2)
+		_, err3 = db.Exec("UPDATE maquina_virtual set ip = ? WHERE NOMBRE = ?", ipAddress, nameVM)
+		if err3 != nil {
+			fmt.Println("Error al realizar la actualizaciòn de la ip", err3)
 		}
 		fmt.Println("Màquina encendida, la direcciòn IP es: " + ipAddress)
 
