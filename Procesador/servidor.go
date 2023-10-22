@@ -832,38 +832,46 @@ func apagarMV(nameVM string) {
 		fmt.Println("Error al configurar SSH:", err)
 	}
 
-	//Comando para enviar señal de apagado a la MV esperando que los programas cierren correctamente
-	acpiCommand := "VBoxManage controlvm " + nameVM + " acpipowerbutton"
+	//Variable que contiene el estado de la MV (Encendida o apagada)
+	running := isRunning(nameVM, host.Ip, config)
 
-	//Comando para apagar la màquina sin esperar que los programas cierren
-	powerOffCommand := "VBoxManage controlvm " + nameVM + " poweroff"
+	if !running {
 
-	fmt.Println("Apagando màquina " + nameVM + "...")
+		startVM(nameVM)
+	} else {
+		//Comando para enviar señal de apagado a la MV esperando que los programas cierren correctamente
+		acpiCommand := "VBoxManage controlvm " + nameVM + " acpipowerbutton"
 
-	enviarComandoSSH(host.Ip, acpiCommand, config)
+		//Comando para apagar la màquina sin esperar que los programas cierren
+		powerOffCommand := "VBoxManage controlvm " + nameVM + " poweroff"
 
-	// Establece un temporizador de espera máximo de 5 minutos
-	maxEspera := time.Now().Add(5 * time.Minute)
+		fmt.Println("Apagando màquina " + nameVM + "...")
 
-	// Espera hasta que la máquina esté apagada o haya pasado el tiempo máximo de espera
-	for time.Now().Before(maxEspera) {
-		if !isRunning(nameVM, host.Ip, config) {
-			break
+		enviarComandoSSH(host.Ip, acpiCommand, config)
+
+		// Establece un temporizador de espera máximo de 5 minutos
+		maxEspera := time.Now().Add(5 * time.Minute)
+
+		// Espera hasta que la máquina esté apagada o haya pasado el tiempo máximo de espera
+		for time.Now().Before(maxEspera) {
+			if !isRunning(nameVM, host.Ip, config) {
+				break
+			}
+
+			// Espera un 5 segundos antes de volver a verificar el estado de la màquina
+			time.Sleep(5 * time.Second)
 		}
 
-		// Espera un 5 segundos antes de volver a verificar el estado de la màquina
-		time.Sleep(5 * time.Second)
-	}
+		if isRunning(nameVM, host.Ip, config) {
+			enviarComandoSSH(host.Ip, powerOffCommand, config)
+		}
+		_, err1 := db.Exec("UPDATE maquina_virtual set estado = 'Apagado' WHERE NOMBRE = ?", nameVM)
+		if err1 != nil {
+			fmt.Println("Error al realizar la actualizaciòn del estado", err1)
+		}
 
-	if isRunning(nameVM, host.Ip, config) {
-		enviarComandoSSH(host.Ip, powerOffCommand, config)
+		fmt.Println("Màquina apagada con èxito")
 	}
-	_, err1 := db.Exec("UPDATE maquina_virtual set estado = 'Apagado' WHERE NOMBRE = ?", nameVM)
-	if err1 != nil {
-		fmt.Println("Error al realizar la actualizaciòn del estado", err1)
-	}
-
-	fmt.Println("Màquina apagada con èxito")
 
 }
 
@@ -1020,44 +1028,54 @@ func startVM(nameVM string) string {
 		fmt.Println("Error al configurar SSH:", err)
 	}
 
-	fmt.Println("Encendiendo la màquina " + nameVM + "...")
+	//Variable que contiene el estado de la MV (Encendida o apagada)
+	running := isRunning(nameVM, host.Ip, config)
 
-	// Comando para encender la máquina virtual
-	startVMCommand := "VBoxManage startvm " + nameVM + " --type headless"
-	enviarComandoSSH(host.Ip, startVMCommand, config)
+	if running {
 
-	fmt.Println("Obteniendo direcciòn IP...")
-	// Espera 10 segundos para que la máquina virtual inicie
-	time.Sleep(10 * time.Second)
+		apagarMV(nameVM)
+		return ""
+	} else {
+		fmt.Println("Encendiendo la màquina " + nameVM + "...")
 
-	// Obtiene la dirección IP de la máquina virtual después de que se inicie
-	getIpCommand := "VBoxManage guestproperty get " + nameVM + " /VirtualBox/GuestInfo/Net/0/V4/IP"
-	var ipAddress string
+		// Comando para encender la máquina virtual
+		startVMCommand := "VBoxManage startvm " + nameVM + " --type headless"
+		enviarComandoSSH(host.Ip, startVMCommand, config)
 
-	for ipAddress == "" || ipAddress == "No value set!" {
-		ipAddress = strings.TrimSpace(enviarComandoSSH(host.Ip, getIpCommand, config))
-		if ipAddress == "No value set!" {
-			time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
-			fmt.Println("Obteniendo direcciòn IP...")
+		fmt.Println("Obteniendo direcciòn IP...")
+		// Espera 10 segundos para que la máquina virtual inicie
+		time.Sleep(10 * time.Second)
+
+		// Obtiene la dirección IP de la máquina virtual después de que se inicie
+		getIpCommand := "VBoxManage guestproperty get " + nameVM + " /VirtualBox/GuestInfo/Net/0/V4/IP"
+		var ipAddress string
+
+		for ipAddress == "" || ipAddress == "No value set!" {
+			ipAddress = strings.TrimSpace(enviarComandoSSH(host.Ip, getIpCommand, config))
+			if ipAddress == "No value set!" {
+				time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
+				fmt.Println("Obteniendo direcciòn IP...")
+			}
+
 		}
 
+		//Almacena solo el valor de la IP quitàndole el texto "Value:"
+		ipAddress = strings.TrimPrefix(ipAddress, "Value:")
+		ipAddress = strings.TrimSpace(ipAddress)
+
+		_, err1 := db.Exec("UPDATE maquina_virtual set estado = 'Encendido' WHERE NOMBRE = ?", nameVM)
+		if err1 != nil {
+			fmt.Println("Error al realizar la actualizaciòn del estado", err1)
+		}
+		_, err2 := db.Exec("UPDATE maquina_virtual set ip = ? WHERE NOMBRE = ?", ipAddress, nameVM)
+		if err2 != nil {
+			fmt.Println("Error al realizar la actualizaciòn de la ip", err2)
+		}
+		fmt.Println("Màquina encendida, la direcciòn IP es: " + ipAddress)
+
+		return ipAddress
 	}
 
-	//Almacena solo el valor de la IP quitàndole el texto "Value:"
-	ipAddress = strings.TrimPrefix(ipAddress, "Value:")
-	ipAddress = strings.TrimSpace(ipAddress)
-
-	_, err1 := db.Exec("UPDATE maquina_virtual set estado = 'Encendido' WHERE NOMBRE = ?", nameVM)
-	if err1 != nil {
-		fmt.Println("Error al realizar la actualizaciòn del estado", err1)
-	}
-	_, err2 := db.Exec("UPDATE maquina_virtual set ip = ? WHERE NOMBRE = ?", ipAddress, nameVM)
-	if err2 != nil {
-		fmt.Println("Error al realizar la actualizaciòn de la ip", err2)
-	}
-	fmt.Println("Màquina encendida, la direcciòn IP es: " + ipAddress)
-
-	return ipAddress
 }
 
 /*
