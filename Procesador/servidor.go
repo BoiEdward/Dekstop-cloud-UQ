@@ -62,16 +62,18 @@ Estructura de datos tipo JSOn que contiene los datos de una màquina virtual
 @Ip Representa la direcciòn Ip de la MV
 */
 type Maquina_virtual struct {
-	Uuid              string
-	Nombre            string
-	Sistema_operativo string
-	Memoria           int
-	Cpu               int
-	Estado            string
-	Hostname          string
-	Ip                string
-	Persona_email     string
-	Host_id           string
+	Uuid                           string
+	Nombre                         string
+	Ram                            int
+	Cpu                            int
+	Ip                             string
+	Estado                         string
+	Hostname                       string
+	Persona_email                  string
+	Host_id                        int
+	Disco_id                       int
+	Sistema_operativo              string
+	Distribucion_sistema_operativo string
 }
 
 type Maquina_virtualQueue struct {
@@ -80,6 +82,7 @@ type Maquina_virtualQueue struct {
 }
 
 /*
+--------------------------------------------------------------------
 Estructura de datos tipo JSON que contiene los campos de un host
 @Id Representa el identificador ùnico del host
 @Nombre Representa el nombre del host
@@ -96,22 +99,26 @@ Estructura de datos tipo JSON que contiene los campos de un host
 @Ip Representa la direcciòn Ip del host
 */
 type Host struct {
-	Id                   int
-	Nombre               string
-	Mac                  string
-	Memoria              int
-	Cpu                  int
-	Adaptador_red        string
-	Almacenamiento_total int
-	Estado               string
-	Sistema_operativo    string
-	Ruta_disco_multi     string
-	Ruta_llave_ssh       string
-	Hostname             string
-	Ip                   string
+	Id                             int
+	Nombre                         string
+	Mac                            string
+	Ip                             string
+	Hostname                       string
+	Ram_total                      int
+	Cpu_total                      int
+	Almacenamiento_total           int
+	Ram_usada                      int
+	Cpu_usada                      int
+	Almacenamiento_usado           int
+	Adaptador_red                  string
+	Estado                         string
+	Ruta_llave_ssh_pub             string
+	Sistema_operativo              string
+	Distribucion_sistema_operativo string
 }
 
 /*
+------------------------------------------------------
 Estructura de datos tipo JSON que contiene los campos para representar una MV del catàlogo
 @Nombre Representa el nombre de la MV
 @Memoria Representa la cantidad de memoria RAM de la MV
@@ -119,10 +126,21 @@ Estructura de datos tipo JSON que contiene los campos para representar una MV de
 @Sistema_operativo Representa el tipo de sistema operativo de la Mv
 */
 type Catalogo struct {
-	Nombre            string
-	Memoria           int
-	Cpu               int
-	Sistema_operativo string
+	Id     int
+	Nombre string
+	Ram    int
+	Cpu    int
+}
+
+// -------------------------
+type Disco struct {
+	Id                             int
+	Nombre                         string
+	Ruta_ubicacion                 string
+	Sistema_operativo              string
+	Distribucion_sistema_operativo string
+	arquitectura                   int
+	Host_id                        int
 }
 
 // Declaraciòn de variables globales
@@ -210,7 +228,7 @@ func manageServer() {
 		fmt.Println("Cantidad de Solicitudes de Especificaciones en la Cola: " + strconv.Itoa(maquina_virtualesQueue.Queue.Len()))
 
 		// Envía una respuesta al cliente.
-		response := map[string]string{"mensaje": "Mensaje JSON de especificaciones recibido correctamente"}
+		response := map[string]string{"mensaje": "Mensaje JSON de crear MV recibido correctamente"}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
@@ -222,7 +240,6 @@ func manageServer() {
 			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
 			return
 		}
-
 		var persona Persona
 		decoder := json.NewDecoder(r.Body)
 		if err := decoder.Decode(&persona); err != nil {
@@ -317,7 +334,7 @@ func manageServer() {
 			return
 		}
 
-		query := "SELECT nombre, sistema_operativo, memoria, cpu, ip, estado FROM maquina_virtual WHERE persona_email = ?"
+		query := "SELECT m.nombre, m.sistema_operativo, m.ram, m.cpu, m.ip, m.estado, d.sistema_operativo, d.distribucion_sistema_operativo FROM maquina_virtual as m INNER JOIN disco as d on m.disco_id = d.id WHERE m.persona_email = ?"
 		rows, err := db.Query(query, persona.Email)
 		if err != nil {
 			// Manejar el error
@@ -328,7 +345,7 @@ func manageServer() {
 		var machines []Maquina_virtual
 		for rows.Next() {
 			var machine Maquina_virtual
-			if err := rows.Scan(&machine.Nombre, &machine.Sistema_operativo, &machine.Memoria, &machine.Cpu, &machine.Ip, &machine.Estado); err != nil {
+			if err := rows.Scan(&machine.Nombre, &machine.Sistema_operativo, &machine.Ram, &machine.Cpu, &machine.Ip, &machine.Estado, &machine.Sistema_operativo, &machine.Distribucion_sistema_operativo); err != nil {
 				// Manejar el error al escanear la fila
 				continue
 			}
@@ -367,8 +384,6 @@ func manageServer() {
 			http.Error(w, "Error al decodificar JSON de la solicitud", http.StatusBadRequest)
 			return
 		}
-
-		fmt.Println(payload)
 
 		// Verifica que el campo "tipo_solicitud" esté presente y sea "modify".
 		tipoSolicitud, isPresent := payload["tipo_solicitud"].(string)
@@ -544,7 +559,7 @@ func checkMaquinasVirtualesQueueChanges() {
 			maquina_virtualesQueue.Queue.Remove(firstElement)
 			mu.Unlock()
 
-			crateVM(firstElement.Value.(Maquina_virtual)) //En el segundo argumento debe ir la ip del host en el cual se va a crear la VM
+			crateVM(firstElement.Value.(Maquina_virtual))
 
 			printMaquinaVirtual(firstElement.Value.(Maquina_virtual), true)
 		}
@@ -570,21 +585,20 @@ func printSpecifications(specs Maquina_virtual, isCreateVM bool) {
 	fmt.Printf("-------------------------\n")
 	fmt.Printf("Nombre de la Máquina: %s\n", specs.Nombre)
 	fmt.Printf("Sistema Operativo: %s\n", specs.Sistema_operativo)
-	fmt.Printf("Memoria Requerida: %d Mb\n", specs.Memoria)
+	fmt.Printf("Distribuciòn SO: %s\n", specs.Distribucion_sistema_operativo)
+	fmt.Printf("Memoria Requerida: %d Mb\n", specs.Ram)
 	fmt.Printf("CPU Requerida: %d núcleos\n", specs.Cpu)
 
 }
 
 func printMaquinaVirtual(specs Maquina_virtual, isCreateVM bool) {
-	// Crea el comando en VirtualBox
-	//comandCreate := "Vboxmanage createvm --name " + specs.Name + " --ostype " + specs.OSType
-	//comandModify := "Vboxmanage modifyvm " + specs.Name + " --memory " + strconv.Itoa(specs.Memory) + " --vram 128"
 
 	// Imprime las especificaciones recibidas.
 	fmt.Printf("-------------------------\n")
 	fmt.Printf("Nombre de la Máquina: %s\n", specs.Nombre)
 	fmt.Printf("Sistema Operativo: %s\n", specs.Sistema_operativo)
-	fmt.Printf("Memoria Requerida: %d Mb\n", specs.Memoria)
+	fmt.Printf("Distribuciòn SO: %s\n", specs.Distribucion_sistema_operativo)
+	fmt.Printf("Memoria Requerida: %d Mb\n", specs.Ram)
 	fmt.Printf("CPU Requerida: %d núcleos\n", specs.Cpu)
 
 }
@@ -650,25 +664,29 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 	//Establece la conexiòn SSH
 	conn, err := ssh.Dial("tcp", host+":22", config)
 	if err != nil {
-		log.Fatalf("Error al establecer la conexiòn SSH: %s", err)
+		log.Println("Error al establecer la conexiòn SSH: %s", err)
+		return "", err
 	}
 	defer conn.Close()
 
 	//Crea una nueva sesiòn SSH
 	session, err := conn.NewSession()
 	if err != nil {
-		log.Fatalf("Error al crear la sesiòn SSH: %s", err)
+		log.Println("Error al crear la sesiòn SSH: %s", err)
+		return "", err
 	}
 	defer session.Close()
-
 	//Ejecuta el comando remoto
 	output, err := session.CombinedOutput(comando)
 	if err != nil {
-		return "", fmt.Errorf("Error al ejecutar el comando remoto: %s", err)
+		log.Println("Error al ejecutar el comando remoto: %s", err)
+		return "", err
 	}
 
 	// Imprime la salida del comando
-	fmt.Println(string(output))
+	if strings.TrimSpace(string(output)) != "" {
+		fmt.Println(string(output))
+	}
 
 	return string(output), nil
 }
@@ -683,7 +701,17 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 func crateVM(specs Maquina_virtual) string {
 
 	//Selecciona un host al azar
-	host := selectHost()
+	host, err10 := selectHost()
+	if err10 != nil {
+		log.Println("Error al seleccionar el host:", err10)
+		return "Error al seleccionar el host"
+	}
+
+	disco, err20 := getDisk(specs.Sistema_operativo, specs.Distribucion_sistema_operativo, host.Id)
+	if err20 != nil {
+		log.Println("Error al obtener el disco:", err20)
+		return "Error al obtener el disco"
+	}
 
 	// Procesa el primer elemento (en este caso, imprime las especificaciones).
 	config, err := configurarSSH(host.Hostname, *privateKeyPath)
@@ -693,18 +721,19 @@ func crateVM(specs Maquina_virtual) string {
 	}
 
 	//Comando para crear una màquina virtual
-	createVM := "VBoxManage createvm --name " + specs.Nombre + " --ostype " + specs.Sistema_operativo + " --register"
+	createVM := "VBoxManage createvm --name " + specs.Nombre + " --ostype " + specs.Distribucion_sistema_operativo + "_" + strconv.Itoa(disco.arquitectura) + " --register"
+	fmt.Println(createVM)
 	uuid, err1 := enviarComandoSSH(host.Ip, createVM, config)
 	if err1 != nil {
-		log.Println("Error al crear y registrar la MV:", err1)
-		return "Error al desconectar el disco de la MV"
+		log.Println("Error al ejecutar el comando para crear y registrar la MV:", err1)
+		return "Error al conectar el disco de la MV"
 	}
 
 	//Comando para asignar la memoria RAM a la MV
-	memoryCommand := "VBoxManage modifyvm " + specs.Nombre + " --memory " + strconv.Itoa(specs.Memoria)
+	memoryCommand := "VBoxManage modifyvm " + specs.Nombre + " --memory " + strconv.Itoa(specs.Ram)
 	_, err2 := enviarComandoSSH(host.Ip, memoryCommand, config)
 	if err2 != nil {
-		log.Println("Error asignar la memoria a la MV:", err2)
+		log.Println("Error ejecutar el comando para asignar la memoria a la MV:", err2)
 		return "Error al asignar la memoria a la MV"
 	}
 
@@ -712,15 +741,15 @@ func crateVM(specs Maquina_virtual) string {
 	sctlCommand := "VBoxManage storagectl " + specs.Nombre + " --name hardisk --add sata"
 	_, err3 := enviarComandoSSH(host.Ip, sctlCommand, config)
 	if err3 != nil {
-		log.Println("Error al asignar el controlador de almacenamiento a la MV:", err3)
+		log.Println("Error al ejecutar el comando para asignar el controlador de almacenamiento a la MV:", err3)
 		return "Error al asignar el controlador de almacenamiento a la MV"
 	}
 
 	//Comando para conectar el disco multiconexiòn a la MV
-	sattachCommand := "VBoxManage storageattach " + specs.Nombre + " --storagectl hardisk --port 0 --device 0 --type hdd --medium " + "\"" + host.Ruta_disco_multi + "\""
+	sattachCommand := "VBoxManage storageattach " + specs.Nombre + " --storagectl hardisk --port 0 --device 0 --type hdd --medium " + "\"" + disco.Ruta_ubicacion + "\""
 	_, err4 := enviarComandoSSH(host.Ip, sattachCommand, config)
 	if err4 != nil {
-		log.Println("Error al conectar el disco a la MV:", err4)
+		log.Println("Error al ejecutar el comando para conectar el disco a la MV: ", err4)
 		return "Error al conectar el disco a la MV"
 	}
 
@@ -728,7 +757,7 @@ func crateVM(specs Maquina_virtual) string {
 	cpuCommand := "VBoxManage modifyvm " + specs.Nombre + " --cpus " + strconv.Itoa(specs.Cpu)
 	_, err5 := enviarComandoSSH(host.Ip, cpuCommand, config)
 	if err5 != nil {
-		log.Println("Error al asignar la cpu a la MV:", err5)
+		log.Println("Error al ejecutar el comando para asignar la cpu a la MV:", err5)
 		return "Error al asignar la cpu a la MV"
 	}
 
@@ -736,7 +765,7 @@ func crateVM(specs Maquina_virtual) string {
 	redAdapterCommand := "VBoxManage modifyvm " + specs.Nombre + " --nic1 bridged --bridgeadapter1 " + "\"" + host.Adaptador_red + "\""
 	_, err6 := enviarComandoSSH(host.Ip, redAdapterCommand, config)
 	if err6 != nil {
-		log.Println("Error al configurar el adaptador de red de la MV:", err6)
+		log.Println("Error al ejecutar el comando para configurar el adaptador de red de la MV:", err6)
 		return "Error al configurar el adaptador de red de la MV"
 	}
 
@@ -751,7 +780,7 @@ func crateVM(specs Maquina_virtual) string {
 		Uuid:              uuid,
 		Nombre:            specs.Nombre,
 		Sistema_operativo: specs.Sistema_operativo,
-		Memoria:           specs.Memoria,
+		Ram:               specs.Ram,
 		Cpu:               specs.Cpu,
 		Estado:            "Apagado",
 		Hostname:          "uqcloud",
@@ -760,9 +789,9 @@ func crateVM(specs Maquina_virtual) string {
 
 	fmt.Println(specs)
 
-	_, err7 := db.Exec("INSERT INTO maquina_virtual (uuid, nombre, sistema_operativo, memoria, cpu, estado,persona_email, host_id, hostname, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		nuevaMaquinaVirtual.Uuid, nuevaMaquinaVirtual.Nombre, nuevaMaquinaVirtual.Sistema_operativo, nuevaMaquinaVirtual.Memoria,
-		nuevaMaquinaVirtual.Cpu, nuevaMaquinaVirtual.Estado, nuevaMaquinaVirtual.Persona_email, host.Id, nuevaMaquinaVirtual.Hostname, nuevaMaquinaVirtual.Ip)
+	_, err7 := db.Exec("INSERT INTO maquina_virtual (uuid, nombre,  ram, cpu, ip, estado, hostname, persona_email, host_id, disco_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		nuevaMaquinaVirtual.Uuid, nuevaMaquinaVirtual.Nombre, nuevaMaquinaVirtual.Ram, nuevaMaquinaVirtual.Cpu,
+		nuevaMaquinaVirtual.Ip, nuevaMaquinaVirtual.Estado, nuevaMaquinaVirtual.Hostname, nuevaMaquinaVirtual.Persona_email, host.Id, disco.Id)
 
 	if err7 != nil {
 		log.Println("Error al crear el registro en la base de datos:", err7)
@@ -780,13 +809,17 @@ func crateVM(specs Maquina_virtual) string {
 @hostIP Paràmetro que contiene la direcciòn Ip del host en el cual està la MV
 @return Retorna true si la màquina està encendida o false en caso contrario
 */
-func isRunning(nameVM string, hostIP string, config *ssh.ClientConfig) (running bool) {
+func isRunning(nameVM string, hostIP string, config *ssh.ClientConfig) (bool, error) {
 
 	//Comando para saber el estado de una màquina virtual
 	command := "VBoxManage showvminfo " + nameVM + " | findstr /C:\"State:\""
-	running = false
+	running := false
 
-	salida, _ := enviarComandoSSH(hostIP, command, config)
+	salida, err := enviarComandoSSH(hostIP, command, config)
+	if err != nil {
+		log.Println("Error al ejecutar el comando para obtener el estado de la màquina:", err)
+		return running, err
+	}
 
 	// Expresión regular para buscar el estado (running)
 	regex := regexp.MustCompile(`State:\s+(running|powered off)`)
@@ -795,12 +828,11 @@ func isRunning(nameVM string, hostIP string, config *ssh.ClientConfig) (running 
 	// matches[1] contendrá "running" o "powered off" dependiendo del estado
 	if len(matches) > 1 {
 		estado := matches[1]
-		fmt.Println("Estado:", estado)
 		if estado == "running" {
 			running = true
 		}
 	}
-	return running
+	return running, nil
 }
 
 /* Funciòn que contiene los comandos necesarios para modificar una màquina virtual. Primero verifica
@@ -812,24 +844,37 @@ si la màquina esta encendida o apagada. En caso de que estè encendida, invoca 
 func modifyVM(specs Maquina_virtual) string {
 
 	//Obtiene el objeto "maquina_virtual"
-	maquinaVirtual := getVM(specs.Nombre)
+	maquinaVirtual, err1 := getVM(specs.Nombre)
+	if err1 != nil {
+		log.Println("Error al obtener la MV:", err1)
+		return "Error al obtener la MV"
+	}
 
 	//Obtiene el host en el cual està alojada la MV
-	host := getHost(maquinaVirtual.Host_id)
+	host, err2 := getHost(maquinaVirtual.Host_id)
+	if err2 != nil {
+		log.Println("Error al obtener el host:", err2)
+		return "Error al obtener el host"
+	}
 
 	config, err := configurarSSH(host.Hostname, *privateKeyPath)
 	if err != nil {
-		fmt.Println("Error al configurar SSH:", err)
+		log.Println("Error al configurar SSH:", err)
+		return "Error al configurar SSH"
 	}
 
 	//Comando para modificar la memoria RAM a la MV
-	memoryCommand := "VBoxManage modifyvm " + specs.Nombre + " --memory " + strconv.Itoa(specs.Memoria)
+	memoryCommand := "VBoxManage modifyvm " + specs.Nombre + " --memory " + strconv.Itoa(specs.Ram)
 
 	//Comando para modificar las unidades de procesamiento
 	cpuCommand := "VBoxManage modifyvm " + specs.Nombre + " --cpus " + strconv.Itoa(specs.Cpu)
 
 	//Variable que contiene el estado de la MV (Encendida o apagada)
-	running := isRunning(specs.Nombre, host.Ip, config)
+	running, err3 := isRunning(specs.Nombre, host.Ip, config)
+	if err3 != nil {
+		log.Println("Error al obtener el estado de la MV:", err3)
+		return "Error al obtener el estado de la MV"
+	}
 
 	if running {
 		fmt.Println("Para modificar la màquina primero debe apagarla")
@@ -849,13 +894,13 @@ func modifyVM(specs Maquina_virtual) string {
 		}
 	}
 
-	if specs.Memoria != 0 {
+	if specs.Ram != 0 {
 		_, err22 := enviarComandoSSH(host.Ip, memoryCommand, config)
 		if err22 != nil {
 			log.Println("Error al realizar la actualizaciòn de la memoria", err22)
 			return "Error al realizar la actualizaciòn de la memoria"
 		}
-		_, err2 := db.Exec("UPDATE maquina_virtual set memoria = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Memoria), specs.Nombre)
+		_, err2 := db.Exec("UPDATE maquina_virtual set ram = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Ram), specs.Nombre)
 		if err2 != nil {
 			log.Println("Error al realizar la actualizaciòn de la memoria en la base de datos", err2)
 			return "Error al realizar la actualizaciòn de la memoria en la base de datos"
@@ -871,24 +916,36 @@ func modifyVM(specs Maquina_virtual) string {
 @hostIP Paràmetro que contiene la direcciòn ip del host
 */
 
-func apagarMV(nameVM string) {
+func apagarMV(nameVM string) string {
 
 	//Obtiene el objeto "maquina_virtual"
-	maquinaVirtual := getVM(nameVM)
+	maquinaVirtual, err := getVM(nameVM)
+	if err != nil {
+		log.Println("Error al obtener la MV:", err)
+		return "Error al obtener la MV"
+	}
 
 	//Obtiene el host en el cual està alojada la MV
-	host := getHost(maquinaVirtual.Host_id)
+	host, err1 := getHost(maquinaVirtual.Host_id)
+	if err1 != nil {
+		log.Println("Error al obtener el host:", err1)
+		return "Error al obtener el host"
+	}
 
-	config, err := configurarSSH(host.Hostname, *privateKeyPath)
-	if err != nil {
-		fmt.Println("Error al configurar SSH:", err)
+	config, err2 := configurarSSH(host.Hostname, *privateKeyPath)
+	if err2 != nil {
+		log.Println("Error al configurar SSH:", err2)
+		return "Error al configurar SSH"
 	}
 
 	//Variable que contiene el estado de la MV (Encendida o apagada)
-	running := isRunning(nameVM, host.Ip, config)
+	running, err3 := isRunning(nameVM, host.Ip, config)
+	if err3 != nil {
+		log.Println("Error al obtener el estado de la MV:", err3)
+		return "Error al obtener el estado de la MV"
+	}
 
 	if !running {
-
 		startVM(nameVM)
 	} else {
 		//Comando para enviar señal de apagado a la MV esperando que los programas cierren correctamente
@@ -900,35 +957,54 @@ func apagarMV(nameVM string) {
 		fmt.Println("Apagando màquina " + nameVM + "...")
 		_, err4 := db.Exec("UPDATE maquina_virtual set estado = 'Procesando' WHERE NOMBRE = ?", nameVM)
 		if err4 != nil {
-			fmt.Println("Error al realizar la actualizaciòn del estado", err4)
+			log.Println("Error al realizar la actualizaciòn del estado", err4)
+			return "Error al realizar la actualizaciòn del estado"
 		}
 
-		enviarComandoSSH(host.Ip, acpiCommand, config)
+		_, err5 := enviarComandoSSH(host.Ip, acpiCommand, config)
+		if err5 != nil {
+			log.Println("Error al enviar el comando para apagar la MV:", err5)
+			return "Error al enviar el comando para apagar la MV"
+		}
 
 		// Establece un temporizador de espera máximo de 5 minutos
 		maxEspera := time.Now().Add(5 * time.Minute)
 
 		// Espera hasta que la máquina esté apagada o haya pasado el tiempo máximo de espera
 		for time.Now().Before(maxEspera) {
-			if !isRunning(nameVM, host.Ip, config) {
+			status, err6 := isRunning(nameVM, host.Ip, config)
+			if err6 != nil {
+				log.Println("Error al obtener el estado de la MV:", err6)
+				return "Error al obtener el estado de la MV"
+			}
+			if !status {
 				break
 			}
 
-			// Espera un 5 segundos antes de volver a verificar el estado de la màquina
-			time.Sleep(5 * time.Second)
+			// Espera un 1 segundo antes de volver a verificar el estado de la màquina
+			time.Sleep(1 * time.Second)
 		}
 
-		if isRunning(nameVM, host.Ip, config) {
-			enviarComandoSSH(host.Ip, powerOffCommand, config)
+		status, err7 := isRunning(nameVM, host.Ip, config)
+		if err7 != nil {
+			log.Println("Error al obtener el estado de la MV:", err7)
+			return "Error al obtener el estado de la MV"
 		}
-		_, err1 := db.Exec("UPDATE maquina_virtual set estado = 'Apagado' WHERE NOMBRE = ?", nameVM)
-		if err1 != nil {
-			fmt.Println("Error al realizar la actualizaciòn del estado", err1)
+		if status {
+			_, err8 := enviarComandoSSH(host.Ip, powerOffCommand, config)
+			if err8 != nil {
+				log.Println("Error al enviar el comando para apagar la MV:", err8)
+				return "Error al enviar el comando para apagar la MV"
+			}
 		}
-
+		_, err9 := db.Exec("UPDATE maquina_virtual set estado = 'Apagado' WHERE NOMBRE = ?", nameVM)
+		if err9 != nil {
+			log.Println("Error al realizar la actualizaciòn del estado", err9)
+			return "Error al realizar la actualizaciòn del estado"
+		}
 		fmt.Println("Màquina apagada con èxito")
 	}
-
+	return ""
 }
 
 /*Funciòn que se encarga de gestionar la cola de solicitudes para la gestiòn de màquinas virtuales
@@ -1020,14 +1096,23 @@ func checkManagementQueueChanges() {
 func deleteVM(nameVM string) string {
 
 	//Obtiene el objeto "maquina_virtual"
-	maquinaVirtual := getVM(nameVM)
+	maquinaVirtual, err := getVM(nameVM)
+	if err != nil {
+		log.Println("Error al obtener la MV:", err)
+		return "Error al obtener  la MV"
+	}
 
 	//Obtiene el host en el cual està alojada la MV
-	host := getHost(maquinaVirtual.Host_id)
+	host, err1 := getHost(maquinaVirtual.Host_id)
+	if err1 != nil {
+		log.Println("Error al obtener el host:", err)
+		return "Error al obtener el host"
+	}
 
-	config, err := configurarSSH(host.Hostname, *privateKeyPath)
-	if err != nil {
-		fmt.Println("Error al configurar SSH:", err)
+	config, err2 := configurarSSH(host.Hostname, *privateKeyPath)
+	if err2 != nil {
+		log.Println("Error al configurar SSH:", err2)
+		return "Error al configurar SSH"
 	}
 
 	//Comando para desconectar el disco de la MV
@@ -1037,28 +1122,32 @@ func deleteVM(nameVM string) string {
 	deleteCommand := "VBoxManage unregistervm " + nameVM + " --delete"
 
 	//Variable que contiene el estado de la MV (Encendida o apagada)
-	running := isRunning(nameVM, host.Ip, config)
+	running, err3 := isRunning(nameVM, host.Ip, config)
+	if err3 != nil {
+		log.Println("Error al obtener el estado de la MV:", err3)
+		return "Error al obtener el estado de la MV"
+	}
 
 	if running {
 		fmt.Println("Debe apagar la màquina para eliminarla")
 		return "Debe apagar la màquina para eliminarla"
 
 	} else {
-		_, err := enviarComandoSSH(host.Ip, disconnectCommand, config)
-		if err != nil {
-			fmt.Println("Error al desconectar el disco de la MV:", err)
+		_, err4 := enviarComandoSSH(host.Ip, disconnectCommand, config)
+		if err4 != nil {
+			log.Println("Error al desconectar el disco de la MV:", err4)
 			return "Error al desconectar el disco de la MV"
 		}
 
-		_, err2 := enviarComandoSSH(host.Ip, deleteCommand, config)
-		if err2 != nil {
-			fmt.Println("Error al eliminar la MV:", err)
+		_, err5 := enviarComandoSSH(host.Ip, deleteCommand, config)
+		if err5 != nil {
+			log.Println("Error al eliminar la MV:", err5)
 			return "Error al eliminar la MV"
 		}
 
-		err3 := db.QueryRow("DELETE FROM maquina_virtual WHERE NOMBRE = ?", nameVM)
-		if err3 == nil {
-			fmt.Println("Error al eliminar el registro de la base de datos: ", err)
+		err6 := db.QueryRow("DELETE FROM maquina_virtual WHERE NOMBRE = ?", nameVM)
+		if err6 == nil {
+			log.Println("Error al eliminar el registro de la base de datos: ", err6)
 			return "Error al eliminar el registro de la base de datos"
 		}
 	}
@@ -1078,21 +1167,33 @@ para que el usuario de la màquina fìsica no se vea afectado
 func startVM(nameVM string) string {
 
 	//Obtiene el objeto "maquina_virtual"
-	maquinaVirtual := getVM(nameVM)
+	maquinaVirtual, err := getVM(nameVM)
+	if err != nil {
+		log.Println("Error al obtener la MV:", err)
+		return "Error al obtener la MV"
+	}
 
 	//Obtiene el host en el cual està alojada la MV
-	host := getHost(maquinaVirtual.Host_id)
+	host, err1 := getHost(maquinaVirtual.Host_id)
+	if err1 != nil {
+		log.Println("Error al obtener el host:", err1)
+		return "Error al obtener el host"
+	}
 
-	config, err := configurarSSH(host.Hostname, *privateKeyPath)
-	if err != nil {
-		fmt.Println("Error al configurar SSH:", err)
+	config, err2 := configurarSSH(host.Hostname, *privateKeyPath)
+	if err2 != nil {
+		log.Println("Error al configurar SSH:", err2)
+		return "Error al configurar SSH"
 	}
 
 	//Variable que contiene el estado de la MV (Encendida o apagada)
-	running := isRunning(nameVM, host.Ip, config)
+	running, err3 := isRunning(nameVM, host.Ip, config)
+	if err3 != nil {
+		log.Println("Error al obtener el estado de la MV:", err3)
+		return "Error al obtener el estado de la MV"
+	}
 
 	if running {
-
 		apagarMV(nameVM)
 		return ""
 	} else {
@@ -1100,12 +1201,17 @@ func startVM(nameVM string) string {
 
 		// Comando para encender la máquina virtual
 		startVMCommand := "VBoxManage startvm " + nameVM + " --type headless"
-		enviarComandoSSH(host.Ip, startVMCommand, config)
+		_, err4 := enviarComandoSSH(host.Ip, startVMCommand, config)
+		if err4 != nil {
+			log.Println("Error al enviar el comando para encender la MV:", err4)
+			return "Error al enviar el comando para encender la MV"
+		}
 
 		fmt.Println("Obteniendo direcciòn IP...")
-		_, err3 := db.Exec("UPDATE maquina_virtual set estado = 'Procesando' WHERE NOMBRE = ?", nameVM)
-		if err3 != nil {
-			fmt.Println("Error al realizar la actualizaciòn del estado", err3)
+		_, err5 := db.Exec("UPDATE maquina_virtual set estado = 'Procesando' WHERE NOMBRE = ?", nameVM)
+		if err5 != nil {
+			log.Println("Error al realizar la actualizaciòn del estado", err5)
+			return "Error al realizar la actualizaciòn del estado"
 		}
 		// Espera 10 segundos para que la máquina virtual inicie
 		time.Sleep(10 * time.Second)
@@ -1113,9 +1219,9 @@ func startVM(nameVM string) string {
 		// Obtiene la dirección IP de la máquina virtual después de que se inicie
 		getIpCommand := "VBoxManage guestproperty get " + nameVM + " /VirtualBox/GuestInfo/Net/0/V4/IP"
 		var ipAddress string
-		ipAddress, err2 := enviarComandoSSH(host.Ip, getIpCommand, config)
-		if err2 != nil {
-			log.Println("Error al obtener la IP de la MV:", err2)
+		ipAddress, err6 := enviarComandoSSH(host.Ip, getIpCommand, config)
+		if err6 != nil {
+			log.Println("Error al obtener la IP de la MV:", err6)
 			return "Error al obtener la IP de la MV"
 		}
 		ipAddress = strings.TrimSpace(ipAddress)
@@ -1126,25 +1232,34 @@ func startVM(nameVM string) string {
 				time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
 				fmt.Println("Obteniendo dirección IP...")
 			}
-			ipAddress, err2 = enviarComandoSSH(host.Ip, getIpCommand, config)
-			if err2 != nil {
-				log.Println("Error al obtener la IP de la MV:", err2)
+			ipAddress, err7 := enviarComandoSSH(host.Ip, getIpCommand, config)
+			if err7 != nil {
+				log.Println("Error al obtener la IP de la MV:", err7)
 				return "Error al obtener la IP de la MV"
 			}
 			ipAddress = strings.TrimSpace(ipAddress)
+		}
+
+		time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
+		ipAddress, err8 := enviarComandoSSH(host.Ip, getIpCommand, config)
+		if err8 != nil {
+			log.Println("Error al enviar el comando para obtener la IP de la MV:", err8)
+			return "Error al enviar el comando para obtener la IP de la MV"
 		}
 
 		//Almacena solo el valor de la IP quitàndole el texto "Value:"
 		ipAddress = strings.TrimPrefix(ipAddress, "Value:")
 		ipAddress = strings.TrimSpace(ipAddress)
 
-		_, err1 := db.Exec("UPDATE maquina_virtual set estado = 'Encendido' WHERE NOMBRE = ?", nameVM)
-		if err1 != nil {
-			fmt.Println("Error al realizar la actualizaciòn del estado", err1)
+		_, err9 := db.Exec("UPDATE maquina_virtual set estado = 'Encendido' WHERE NOMBRE = ?", nameVM)
+		if err9 != nil {
+			log.Println("Error al realizar la actualizaciòn del estado", err9)
+			return "Error al realizar la actualizaciòn del estado"
 		}
-		_, err3 = db.Exec("UPDATE maquina_virtual set ip = ? WHERE NOMBRE = ?", ipAddress, nameVM)
-		if err3 != nil {
-			fmt.Println("Error al realizar la actualizaciòn de la ip", err3)
+		_, err10 := db.Exec("UPDATE maquina_virtual set ip = ? WHERE NOMBRE = ?", ipAddress, nameVM)
+		if err10 != nil {
+			log.Println("Error al realizar la actualizaciòn de la IP", err10)
+			return "Error al realizar la actualizaciòn de la IP"
 		}
 		fmt.Println("Màquina encendida, la direcciòn IP es: " + ipAddress)
 
@@ -1157,14 +1272,15 @@ func startVM(nameVM string) string {
 Funciòn que contiene el algoritmo de asignaciòn tipo aleatorio. Se encarga de escoger un host de la base de datos al azar
 Return Retorna el host seleccionado.
 */
+func selectHost() (Host, error) {
 
-func selectHost() Host {
-
+	var host Host
 	// Consulta para contar el número de registros en la tabla "host"
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM host").Scan(&count)
 	if err != nil {
-		log.Fatal(err)
+		log.Println("Error al realizar la consulta: " + err.Error())
+		return host, err
 	}
 
 	// Genera un número aleatorio dentro del rango de registros
@@ -1172,78 +1288,95 @@ func selectHost() Host {
 	randomIndex := rand.Intn(count)
 
 	// Consulta para seleccionar un registro aleatorio de la tabla "host"
-	var host Host
-
-	err = db.QueryRow("SELECT * FROM host LIMIT ?, 1", randomIndex).Scan(&host.Id, &host.Nombre, &host.Mac, &host.Memoria, &host.Cpu, &host.Adaptador_red, &host.Almacenamiento_total, &host.Estado, &host.Sistema_operativo, &host.Ruta_disco_multi, &host.Ruta_llave_ssh, &host.Hostname, &host.Ip)
+	err = db.QueryRow("SELECT * FROM host ORDER BY RAND() LIMIT 1 OFFSET ?", randomIndex).Scan(&host.Id, &host.Nombre, &host.Mac, &host.Ip, &host.Hostname, &host.Ram_total, &host.Cpu_total, &host.Almacenamiento_total, &host.Ram_usada, &host.Cpu_usada, &host.Almacenamiento_usado, &host.Adaptador_red, &host.Estado, &host.Ruta_llave_ssh_pub, &host.Sistema_operativo, &host.Distribucion_sistema_operativo)
 	if err != nil {
-		log.Fatal(err)
+		log.Println("Error al realizar la consulta sql: ", err)
+		return host, err
 	}
 
 	// Imprime el registro aleatorio seleccionado
-	fmt.Printf("Registro aleatorio seleccionado:\n")
-	fmt.Printf("ID: %d, Nombre: %s, MAC: %s, Memoria: %d, CPU: %d, Adaptador Red: %s, Estado: %s, SO: %s, Ruta Disco Multi: %s, Ruta Llave SSH: %s, Hostname: %s, IP: %s\n", host.Id, host.Nombre, host.Mac, host.Memoria, host.Cpu, host.Adaptador_red, host.Estado, host.Sistema_operativo, host.Ruta_disco_multi, host.Ruta_llave_ssh, host.Hostname, host.Ip)
+	fmt.Printf("Registro aleatorio seleccionado: ")
+	fmt.Printf("ID: %d, Nombre: %s, IP: %s\n", host.Id, host.Nombre, host.Ip)
 
-	return host
+	return host, nil
 }
 
-func existVM(nameVM string) bool {
+func existVM(nameVM string) (bool, error) {
 
 	var existe bool
 	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM maquinas_virtuales WHERE nombre = ?)", nameVM).Scan(&existe)
 	if err != nil {
-		log.Fatal(err)
+		log.Println("Error al realizar la consulta: ", err)
+		return existe, err
 	}
 
 	if existe {
-		return true
+		return true, nil
 	}
 
-	return false
+	return false, nil
 }
 
-func getHost(idHost string) Host {
+func getHost(idHost int) (Host, error) {
 
 	var host Host
-	err := db.QueryRow("SELECT * FROM host WHERE id = ?", idHost).Scan(&host.Id, &host.Nombre, &host.Mac, &host.Memoria, &host.Cpu, &host.Adaptador_red, &host.Almacenamiento_total, &host.Estado, &host.Sistema_operativo, &host.Ruta_disco_multi, &host.Ruta_llave_ssh, &host.Hostname, &host.Ip)
+	err := db.QueryRow("SELECT * FROM host WHERE id = ?", idHost).Scan(&host.Id, &host.Nombre, &host.Mac, &host.Ip, &host.Hostname, &host.Ram_total, &host.Cpu_total, &host.Almacenamiento_total, &host.Ram_usada, &host.Cpu_usada, &host.Almacenamiento_usado, &host.Adaptador_red, &host.Estado, &host.Ruta_llave_ssh_pub, &host.Sistema_operativo, &host.Distribucion_sistema_operativo)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			fmt.Println("No se encontró el host con el nombre especificado.")
+			log.Println("No se encontró el host con el nombre especificado.")
 		} else {
-			log.Fatal(err)
+			log.Println("Error al realizar la consulta: ", err)
 		}
+		return host, err
 	}
 
-	return host
+	return host, nil
 
 }
 
-func getVM(nameVM string) Maquina_virtual {
+func getVM(nameVM string) (Maquina_virtual, error) {
 
 	var maquinaVirtual Maquina_virtual
-	err := db.QueryRow("SELECT * FROM maquina_virtual WHERE nombre = ?", nameVM).Scan(&maquinaVirtual.Uuid, &maquinaVirtual.Nombre, &maquinaVirtual.Sistema_operativo, &maquinaVirtual.Memoria, &maquinaVirtual.Cpu, &maquinaVirtual.Estado, &maquinaVirtual.Persona_email, &maquinaVirtual.Host_id, &maquinaVirtual.Hostname, &maquinaVirtual.Ip)
+	err := db.QueryRow("SELECT * FROM maquina_virtual WHERE nombre = ?", nameVM).Scan(&maquinaVirtual.Uuid, &maquinaVirtual.Nombre, &maquinaVirtual.Ram, &maquinaVirtual.Cpu, &maquinaVirtual.Ip, &maquinaVirtual.Estado, &maquinaVirtual.Hostname, &maquinaVirtual.Persona_email, &maquinaVirtual.Host_id, &maquinaVirtual.Disco_id)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			fmt.Println("No se encontró la màquina virtual con el nombre especificado.")
+			log.Println("No se encontró la màquina virtual con el nombre especificado.")
 		} else {
-			log.Fatal(err)
+			log.Println("Hubo un error al realizar la consulta: ", err)
 		}
+		return maquinaVirtual, err
 	}
 
-	return maquinaVirtual
+	return maquinaVirtual, nil
 }
 
-func getUser(email string) Persona {
+func getUser(email string) (Persona, error) {
 
 	var persona Persona
 	err := db.QueryRow("SELECT * FROM persona WHERE email = ?", email).Scan(&persona.Email, &persona.Nombre, &persona.Apellido, &persona.Contrasenia)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			fmt.Println("No se encontrò un usuario con el email especificado")
+			log.Println("No se encontrò un usuario con el email especificado")
 		} else {
-			log.Fatal(err)
+			log.Println("Hubo un error al realizar la consulta: " + err.Error())
 		}
+		return persona, err
 	}
 
-	return persona
+	return persona, nil
+}
 
+func getDisk(sistema_operativo string, distribucion_sistema_operativo string, id_host int) (Disco, error) {
+
+	var disco Disco
+	err := db.QueryRow("Select * from disco where sistema_operativo = ? and distribucion_sistema_operativo =? and host_id = ?", sistema_operativo, distribucion_sistema_operativo, id_host).Scan(&disco.Id, &disco.Nombre, &disco.Ruta_ubicacion, &disco.Sistema_operativo, &disco.Distribucion_sistema_operativo, &disco.arquitectura, &disco.Host_id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Println("No se encontrò un disco: " + sistema_operativo + " " + distribucion_sistema_operativo)
+		} else {
+			log.Println("Hubo un error al realizar la consulta: " + err.Error())
+		}
+		return disco, err
+	}
+	return disco, nil
 }

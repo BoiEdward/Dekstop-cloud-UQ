@@ -9,24 +9,26 @@ import (
 )
 
 type Maquina_virtual struct {
-	Uuid              string
-	Nombre            string
-	Sistema_operativo string
-	Memoria           int
-	Cpu               int
-	Estado            string
-	Hostname          string
-	Ip                string
-	Persona_email     string
-	Host_id           string
+	Uuid                           string
+	Nombre                         string
+	Ram                            int
+	Cpu                            int
+	Ip                             string
+	Estado                         string
+	Hostname                       string
+	Persona_email                  string
+	Host_id                        int
+	Disco_id                       int
+	Sistema_operativo              string
+	Distribucion_sistema_operativo string
 }
 
 func main() {
 	// Inicia una goroutine para enviar mensajes JSON cada segundo.
 	//go sendMessages()
 	//createVMTest()
-	modifyVMTest()
-	//deleteVMTest()
+	//modifyVMTest()
+	deleteVMTest()
 	//startVMTest()
 	//stopVMTest()
 
@@ -127,11 +129,12 @@ func enviarMensaje(message []byte, url string) {
 func createVMTest() {
 	// Datos del mensaje JSON que queremos enviar al servidor.
 	message := Maquina_virtual{
-		Nombre:            "UqCloudTest",
-		Sistema_operativo: "Debian_64",
-		Memoria:           2048,
-		Cpu:               3,
-		Persona_email:     "jslopezd@uqvirtual.edu.co",
+		Nombre:                         "UqCloudTest",
+		Sistema_operativo:              "Linux",
+		Distribucion_sistema_operativo: "Debian",
+		Ram:                            2048,
+		Cpu:                            3,
+		Persona_email:                  "jslopezd@uqvirtual.edu.co",
 	}
 
 	messageJSON, err := json.Marshal(message)
@@ -150,11 +153,12 @@ func createVMTest() {
 func modifyVMTest() {
 	// Datos del mensaje JSON que queremos enviar al servidor.
 	message := Maquina_virtual{
-		Nombre:            "UqCloudTest",
-		Sistema_operativo: "Debian_64",
-		Memoria:           2048,
-		Cpu:               2,
-		Persona_email:     "jslopezd@uqvirtual.edu.co",
+		Nombre:                         "UqCloudTest",
+		Sistema_operativo:              "Linux",
+		Distribucion_sistema_operativo: "Debian_64",
+		Ram:                            512,
+		Cpu:                            2,
+		Persona_email:                  "jslopezd@uqvirtual.edu.co",
 	}
 
 	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
