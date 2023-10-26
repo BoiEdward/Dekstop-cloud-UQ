@@ -28,8 +28,8 @@ func main() {
 	//go sendMessages()
 	//createVMTest()
 	//modifyVMTest()
-	deleteVMTest()
-	//startVMTest()
+	//deleteVMTest()
+	startVMTest()
 	//stopVMTest()
 
 	// Espera una señal de cierre (Ctrl+C) para detener el programa.
@@ -129,7 +129,7 @@ func enviarMensaje(message []byte, url string) {
 func createVMTest() {
 	// Datos del mensaje JSON que queremos enviar al servidor.
 	message := Maquina_virtual{
-		Nombre:                         "UqCloudTest",
+		Nombre:                         "UqCloud Test",
 		Sistema_operativo:              "Linux",
 		Distribucion_sistema_operativo: "Debian",
 		Ram:                            2048,
@@ -153,7 +153,7 @@ func createVMTest() {
 func modifyVMTest() {
 	// Datos del mensaje JSON que queremos enviar al servidor.
 	message := Maquina_virtual{
-		Nombre:                         "UqCloudTest",
+		Nombre:                         "UqCloud Test",
 		Sistema_operativo:              "Linux",
 		Distribucion_sistema_operativo: "Debian_64",
 		Ram:                            512,
@@ -184,7 +184,7 @@ func deleteVMTest() {
 	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
 	payload := map[string]interface{}{
 		"tipo_solicitud": "delete",
-		"nombreVM":       "UqCloudTest",
+		"nombreVM":       "UqCloud Test_Jhoiner",
 	}
 
 	messageJSON, err := json.Marshal(payload)
@@ -204,7 +204,7 @@ func startVMTest() {
 	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
 	payload := map[string]interface{}{
 		"tipo_solicitud": "start",
-		"nombreVM":       "UqCloudTest",
+		"nombreVM":       "UqCloud Test_Jhoiner",
 	}
 
 	messageJSON, err := json.Marshal(payload)
@@ -224,7 +224,7 @@ func stopVMTest() {
 	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
 	payload := map[string]interface{}{
 		"tipo_solicitud": "stop",
-		"nombreVM":       "UqCloudTest",
+		"nombreVM":       "UqCloud Test_Jhoiner",
 	}
 
 	messageJSON, err := json.Marshal(payload)

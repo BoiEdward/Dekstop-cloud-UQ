@@ -48,6 +48,7 @@ type Persona struct {
 	Email       string
 	Usuario     string
 	Contrasenia string
+	Rol         string
 }
 
 /*
@@ -577,9 +578,6 @@ func checkMaquinasVirtualesQueueChanges() {
 indica que la peticiòn es para modificar una màquina virtual
 */
 func printSpecifications(specs Maquina_virtual, isCreateVM bool) {
-	// Crea el comando en VirtualBox
-	//comandCreate := "Vboxmanage createvm --name " + specs.Name + " --ostype " + specs.OSType
-	//comandModify := "Vboxmanage modifyvm " + specs.Name + " --memory " + strconv.Itoa(specs.Memory) + " --vram 128"
 
 	// Imprime las especificaciones recibidas.
 	fmt.Printf("-------------------------\n")
@@ -664,7 +662,7 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 	//Establece la conexiòn SSH
 	conn, err := ssh.Dial("tcp", host+":22", config)
 	if err != nil {
-		log.Println("Error al establecer la conexiòn SSH: %s", err)
+		log.Println("Error al establecer la conexiòn SSH: ", err)
 		return "", err
 	}
 	defer conn.Close()
@@ -672,14 +670,14 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 	//Crea una nueva sesiòn SSH
 	session, err := conn.NewSession()
 	if err != nil {
-		log.Println("Error al crear la sesiòn SSH: %s", err)
+		log.Println("Error al crear la sesiòn SSH: ", err)
 		return "", err
 	}
 	defer session.Close()
 	//Ejecuta el comando remoto
 	output, err := session.CombinedOutput(comando)
 	if err != nil {
-		log.Println("Error al ejecutar el comando remoto: %s", err)
+		log.Println("Error al ejecutar el comando remoto: " + string(output))
 		return "", err
 	}
 
@@ -699,6 +697,27 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 @config Paràmetro que contiene la configuraciòn de la conexiòn SSH con el host
 */
 func crateVM(specs Maquina_virtual) string {
+
+	//obtiene el usuario que hace la peticiòn
+	user, error := getUser(specs.Persona_email)
+	if error != nil {
+		log.Println("Error al obtener el usuario:", error)
+		return "Error al obtener el usuario"
+	}
+
+	nameVM := specs.Nombre + "_" + user.Nombre
+
+	//Consulta si existe una MV con ese nombre
+	existe, error1 := existVM(nameVM)
+	if error1 != nil {
+		if error1 != sql.ErrNoRows {
+			log.Println("Error al consultar si existe una MV con el nombre indicado: ", error1)
+			return "Error al consultar si existe una MV con el nombre indicado"
+		}
+	} else if existe {
+		fmt.Println("El nombre " + nameVM + " no està disponible, por favor ingrese otro.")
+		return "Nombre de la MV no disponible"
+	}
 
 	//Selecciona un host al azar
 	host, err10 := selectHost()
@@ -721,16 +740,16 @@ func crateVM(specs Maquina_virtual) string {
 	}
 
 	//Comando para crear una màquina virtual
-	createVM := "VBoxManage createvm --name " + specs.Nombre + " --ostype " + specs.Distribucion_sistema_operativo + "_" + strconv.Itoa(disco.arquitectura) + " --register"
+	createVM := "VBoxManage createvm --name " + "\"" + nameVM + "\"" + " --ostype " + specs.Distribucion_sistema_operativo + "_" + strconv.Itoa(disco.arquitectura) + " --register"
 	fmt.Println(createVM)
 	uuid, err1 := enviarComandoSSH(host.Ip, createVM, config)
 	if err1 != nil {
 		log.Println("Error al ejecutar el comando para crear y registrar la MV:", err1)
-		return "Error al conectar el disco de la MV"
+		return "Error al crear la MV"
 	}
 
 	//Comando para asignar la memoria RAM a la MV
-	memoryCommand := "VBoxManage modifyvm " + specs.Nombre + " --memory " + strconv.Itoa(specs.Ram)
+	memoryCommand := "VBoxManage modifyvm " + "\"" + nameVM + "\"" + " --memory " + strconv.Itoa(specs.Ram)
 	_, err2 := enviarComandoSSH(host.Ip, memoryCommand, config)
 	if err2 != nil {
 		log.Println("Error ejecutar el comando para asignar la memoria a la MV:", err2)
@@ -738,7 +757,7 @@ func crateVM(specs Maquina_virtual) string {
 	}
 
 	//Comando para agregar el controlador de almacenamiento
-	sctlCommand := "VBoxManage storagectl " + specs.Nombre + " --name hardisk --add sata"
+	sctlCommand := "VBoxManage storagectl " + "\"" + nameVM + "\"" + " --name hardisk --add sata"
 	_, err3 := enviarComandoSSH(host.Ip, sctlCommand, config)
 	if err3 != nil {
 		log.Println("Error al ejecutar el comando para asignar el controlador de almacenamiento a la MV:", err3)
@@ -746,7 +765,7 @@ func crateVM(specs Maquina_virtual) string {
 	}
 
 	//Comando para conectar el disco multiconexiòn a la MV
-	sattachCommand := "VBoxManage storageattach " + specs.Nombre + " --storagectl hardisk --port 0 --device 0 --type hdd --medium " + "\"" + disco.Ruta_ubicacion + "\""
+	sattachCommand := "VBoxManage storageattach " + "\"" + nameVM + "\"" + " --storagectl hardisk --port 0 --device 0 --type hdd --medium " + "\"" + disco.Ruta_ubicacion + "\""
 	_, err4 := enviarComandoSSH(host.Ip, sattachCommand, config)
 	if err4 != nil {
 		log.Println("Error al ejecutar el comando para conectar el disco a la MV: ", err4)
@@ -754,7 +773,7 @@ func crateVM(specs Maquina_virtual) string {
 	}
 
 	//Comando para asignar las unidades de procesamiento
-	cpuCommand := "VBoxManage modifyvm " + specs.Nombre + " --cpus " + strconv.Itoa(specs.Cpu)
+	cpuCommand := "VBoxManage modifyvm " + "\"" + nameVM + "\"" + " --cpus " + strconv.Itoa(specs.Cpu)
 	_, err5 := enviarComandoSSH(host.Ip, cpuCommand, config)
 	if err5 != nil {
 		log.Println("Error al ejecutar el comando para asignar la cpu a la MV:", err5)
@@ -762,7 +781,7 @@ func crateVM(specs Maquina_virtual) string {
 	}
 
 	//comando para poner el adaptador de red en modo puente (Bridge)
-	redAdapterCommand := "VBoxManage modifyvm " + specs.Nombre + " --nic1 bridged --bridgeadapter1 " + "\"" + host.Adaptador_red + "\""
+	redAdapterCommand := "VBoxManage modifyvm " + "\"" + nameVM + "\"" + " --nic1 bridged --bridgeadapter1 " + "\"" + host.Adaptador_red + "\""
 	_, err6 := enviarComandoSSH(host.Ip, redAdapterCommand, config)
 	if err6 != nil {
 		log.Println("Error al ejecutar el comando para configurar el adaptador de red de la MV:", err6)
@@ -778,7 +797,7 @@ func crateVM(specs Maquina_virtual) string {
 
 	nuevaMaquinaVirtual := Maquina_virtual{
 		Uuid:              uuid,
-		Nombre:            specs.Nombre,
+		Nombre:            nameVM,
 		Sistema_operativo: specs.Sistema_operativo,
 		Ram:               specs.Ram,
 		Cpu:               specs.Cpu,
@@ -812,7 +831,7 @@ func crateVM(specs Maquina_virtual) string {
 func isRunning(nameVM string, hostIP string, config *ssh.ClientConfig) (bool, error) {
 
 	//Comando para saber el estado de una màquina virtual
-	command := "VBoxManage showvminfo " + nameVM + " | findstr /C:\"State:\""
+	command := "VBoxManage showvminfo " + "\"" + nameVM + "\"" + " | findstr /C:\"State:\""
 	running := false
 
 	salida, err := enviarComandoSSH(hostIP, command, config)
@@ -864,10 +883,10 @@ func modifyVM(specs Maquina_virtual) string {
 	}
 
 	//Comando para modificar la memoria RAM a la MV
-	memoryCommand := "VBoxManage modifyvm " + specs.Nombre + " --memory " + strconv.Itoa(specs.Ram)
+	memoryCommand := "VBoxManage modifyvm " + "\"" + specs.Nombre + "\"" + " --memory " + strconv.Itoa(specs.Ram)
 
 	//Comando para modificar las unidades de procesamiento
-	cpuCommand := "VBoxManage modifyvm " + specs.Nombre + " --cpus " + strconv.Itoa(specs.Cpu)
+	cpuCommand := "VBoxManage modifyvm " + "\"" + specs.Nombre + "\"" + " --cpus " + strconv.Itoa(specs.Cpu)
 
 	//Variable que contiene el estado de la MV (Encendida o apagada)
 	running, err3 := isRunning(specs.Nombre, host.Ip, config)
@@ -949,10 +968,10 @@ func apagarMV(nameVM string) string {
 		startVM(nameVM)
 	} else {
 		//Comando para enviar señal de apagado a la MV esperando que los programas cierren correctamente
-		acpiCommand := "VBoxManage controlvm " + nameVM + " acpipowerbutton"
+		acpiCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " acpipowerbutton"
 
 		//Comando para apagar la màquina sin esperar que los programas cierren
-		powerOffCommand := "VBoxManage controlvm " + nameVM + " poweroff"
+		powerOffCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " poweroff"
 
 		fmt.Println("Apagando màquina " + nameVM + "...")
 		_, err4 := db.Exec("UPDATE maquina_virtual set estado = 'Procesando' WHERE NOMBRE = ?", nameVM)
@@ -1116,10 +1135,12 @@ func deleteVM(nameVM string) string {
 	}
 
 	//Comando para desconectar el disco de la MV
-	disconnectCommand := "VBoxManage storageattach " + nameVM + " --storagectl hardisk --port 0 --device 0 --medium none"
+	disconnectCommand := "VBoxManage storageattach " + "\"" + nameVM + "\"" + " --storagectl hardisk --port 0 --device 0 --medium none"
+	fmt.Println(disconnectCommand)
 
 	//Comando para eliminar la MV
-	deleteCommand := "VBoxManage unregistervm " + nameVM + " --delete"
+	deleteCommand := "VBoxManage unregistervm " + "\"" + nameVM + "\"" + " --delete"
+	fmt.Println(deleteCommand)
 
 	//Variable que contiene el estado de la MV (Encendida o apagada)
 	running, err3 := isRunning(nameVM, host.Ip, config)
@@ -1200,7 +1221,7 @@ func startVM(nameVM string) string {
 		fmt.Println("Encendiendo la màquina " + nameVM + "...")
 
 		// Comando para encender la máquina virtual
-		startVMCommand := "VBoxManage startvm " + nameVM + " --type headless"
+		startVMCommand := "VBoxManage startvm " + "\"" + nameVM + "\"" + " --type headless"
 		_, err4 := enviarComandoSSH(host.Ip, startVMCommand, config)
 		if err4 != nil {
 			log.Println("Error al enviar el comando para encender la MV:", err4)
@@ -1217,7 +1238,7 @@ func startVM(nameVM string) string {
 		time.Sleep(10 * time.Second)
 
 		// Obtiene la dirección IP de la máquina virtual después de que se inicie
-		getIpCommand := "VBoxManage guestproperty get " + nameVM + " /VirtualBox/GuestInfo/Net/0/V4/IP"
+		getIpCommand := "VBoxManage guestproperty get " + "\"" + nameVM + "\"" + " /VirtualBox/GuestInfo/Net/0/V4/IP"
 		var ipAddress string
 		ipAddress, err6 := enviarComandoSSH(host.Ip, getIpCommand, config)
 		if err6 != nil {
@@ -1232,9 +1253,9 @@ func startVM(nameVM string) string {
 				time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
 				fmt.Println("Obteniendo dirección IP...")
 			}
-			ipAddress, err7 := enviarComandoSSH(host.Ip, getIpCommand, config)
-			if err7 != nil {
-				log.Println("Error al obtener la IP de la MV:", err7)
+			ipAddress, err6 = enviarComandoSSH(host.Ip, getIpCommand, config)
+			if err6 != nil {
+				log.Println("Error al obtener la IP de la MV:", err6)
 				return "Error al obtener la IP de la MV"
 			}
 			ipAddress = strings.TrimSpace(ipAddress)
@@ -1304,17 +1325,16 @@ func selectHost() (Host, error) {
 func existVM(nameVM string) (bool, error) {
 
 	var existe bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM maquinas_virtuales WHERE nombre = ?)", nameVM).Scan(&existe)
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM maquina_virtual WHERE nombre = ?)", nameVM).Scan(&existe)
 	if err != nil {
-		log.Println("Error al realizar la consulta: ", err)
-		return existe, err
+		if err == sql.ErrNoRows {
+			existe = false
+		} else {
+			log.Println("Error al realizar la consulta: ", err)
+			return existe, err
+		}
 	}
-
-	if existe {
-		return true, nil
-	}
-
-	return false, nil
+	return existe, err
 }
 
 func getHost(idHost int) (Host, error) {
@@ -1353,7 +1373,7 @@ func getVM(nameVM string) (Maquina_virtual, error) {
 func getUser(email string) (Persona, error) {
 
 	var persona Persona
-	err := db.QueryRow("SELECT * FROM persona WHERE email = ?", email).Scan(&persona.Email, &persona.Nombre, &persona.Apellido, &persona.Contrasenia)
+	err := db.QueryRow("SELECT * FROM persona WHERE email = ?", email).Scan(&persona.Email, &persona.Nombre, &persona.Apellido, &persona.Contrasenia, &persona.Rol)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			log.Println("No se encontrò un usuario con el email especificado")
