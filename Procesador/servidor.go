@@ -297,11 +297,11 @@ func manageServer() {
 			return
 		}
 
-		query := "INSERT INTO persona (nombre, apellido, email, contrasenia) VALUES ( ?, ?, ?, ? );"
+		query := "INSERT INTO persona (nombre, apellido, email, contrasenia, rol) VALUES ( ?, ?, ?, ?, ?);"
 		var resultUsername string
 
 		//Consulta en la base de datos si el usuario existe
-		a, err := db.Exec(query, persona.Nombre, persona.Apellido, persona.Email, hashedPassword)
+		a, err := db.Exec(query, persona.Nombre, persona.Apellido, persona.Email, hashedPassword, "Estudiante")
 		fmt.Println(a)
 		if err != nil {
 			fmt.Println("Error al registrar.")
@@ -334,7 +334,7 @@ func manageServer() {
 			return
 		}
 
-		query := "SELECT m.nombre, m.sistema_operativo, m.ram, m.cpu, m.ip, m.estado, d.sistema_operativo, d.distribucion_sistema_operativo FROM maquina_virtual as m INNER JOIN disco as d on m.disco_id = d.id WHERE m.persona_email = ?"
+		query := "SELECT m.nombre, m.ram, m.cpu, m.ip, m.estado, d.sistema_operativo, d.distribucion_sistema_operativo FROM maquina_virtual as m INNER JOIN disco as d on m.disco_id = d.id WHERE m.persona_email = ?"
 		rows, err := db.Query(query, persona.Email)
 		if err != nil {
 			// Manejar el error
@@ -345,7 +345,7 @@ func manageServer() {
 		var machines []Maquina_virtual
 		for rows.Next() {
 			var machine Maquina_virtual
-			if err := rows.Scan(&machine.Nombre, &machine.Sistema_operativo, &machine.Ram, &machine.Cpu, &machine.Ip, &machine.Estado, &machine.Sistema_operativo, &machine.Distribucion_sistema_operativo); err != nil {
+			if err := rows.Scan(&machine.Nombre, &machine.Ram, &machine.Cpu, &machine.Ip, &machine.Estado, &machine.Sistema_operativo, &machine.Distribucion_sistema_operativo); err != nil {
 				// Manejar el error al escanear la fila
 				continue
 			}
