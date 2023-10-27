@@ -719,11 +719,18 @@ func crateVM(specs Maquina_virtual) string {
 		return "Nombre de la MV no disponible"
 	}
 
-	//Selecciona un host al azar
-	host, err10 := selectHost()
-	if err10 != nil {
-		log.Println("Error al seleccionar el host:", err10)
-		return "Error al seleccionar el host"
+	availableResources := false
+	var host Host
+	err10 := error
+
+	for !availableResources {
+		//Selecciona un host al azar
+		host, err10 = selectHost()
+		if err10 != nil {
+			log.Println("Error al seleccionar el host:", err10)
+			return "Error al seleccionar el host"
+		}
+		availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host)
 	}
 
 	disco, err20 := getDisk(specs.Sistema_operativo, specs.Distribucion_sistema_operativo, host.Id)
@@ -806,15 +813,21 @@ func crateVM(specs Maquina_virtual) string {
 		Persona_email:     specs.Persona_email,
 	}
 
-	fmt.Println(specs)
-
 	_, err7 := db.Exec("INSERT INTO maquina_virtual (uuid, nombre,  ram, cpu, ip, estado, hostname, persona_email, host_id, disco_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		nuevaMaquinaVirtual.Uuid, nuevaMaquinaVirtual.Nombre, nuevaMaquinaVirtual.Ram, nuevaMaquinaVirtual.Cpu,
 		nuevaMaquinaVirtual.Ip, nuevaMaquinaVirtual.Estado, nuevaMaquinaVirtual.Hostname, nuevaMaquinaVirtual.Persona_email, host.Id, disco.Id)
-
 	if err7 != nil {
 		log.Println("Error al crear el registro en la base de datos:", err7)
 		return "Error al crear el registro en la base de datos"
+	}
+
+	usedCpu := host.Cpu_usada + specs.Cpu
+	usedRam := host.Ram_usada + (specs.Ram)
+
+	_, err8 := db.Exec("UPDATE host SET ram_usada = ?, cpu_usada = ? where id = ?", usedRam, usedCpu, host.Id)
+	if err8 != nil {
+		log.Println("Error al actualizar el host en la base de datos: ", err8)
+		return "Error al actualizar el host en la base de datos"
 	}
 
 	fmt.Println("Màquina virtual creada con èxito")
@@ -900,33 +913,73 @@ func modifyVM(specs Maquina_virtual) string {
 		return "Para modificar la màquina primero debe apagarla"
 	}
 
-	if specs.Cpu != 0 {
-		_, err11 := enviarComandoSSH(host.Ip, cpuCommand, config)
-		if err11 != nil {
-			log.Println("Error al realizar la actualizaciòn de la cpu", err11)
-			return "Error al realizar la actualizaciòn de la cpu"
+	if specs.Cpu != 0 && specs.Cpu != maquinaVirtual.Cpu {
+		var cpu_host_usada int
+		flagCpu := true
+
+		if specs.Cpu < maquinaVirtual.Cpu {
+			cpu_host_usada = host.Cpu_usada - (maquinaVirtual.Cpu - specs.Cpu)
+		} else {
+			cpu_host_usada = host.Cpu_usada + (specs.Cpu - maquinaVirtual.Cpu)
+			recDisponibles := validarDisponibilidadRecursosHost((specs.Cpu - maquinaVirtual.Cpu), 0, host)
+			if !recDisponibles {
+				fmt.Println("No se pudo aumentar la cpu, no hay recursos disponibles en el host")
+				flagCpu = false
+			}
 		}
-		_, err1 := db.Exec("UPDATE maquina_virtual set cpu = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Cpu), specs.Nombre)
-		if err1 != nil {
-			log.Println("Error al realizar la actualizaciòn de la cpu", err1)
-			return "Error al realizar la actualizaciòn de la cpu"
+		if flagCpu {
+			_, er := db.Exec("UPDATE host SET cpu_usada = ? where id = ?", cpu_host_usada, host.Id)
+			if er != nil {
+				log.Println("Error al actualizar la cpu_usada del host en la base de datos: ", er)
+				return "Error al actualizar el host en la base de datos"
+			}
+			_, err11 := enviarComandoSSH(host.Ip, cpuCommand, config)
+			if err11 != nil {
+				log.Println("Error al realizar la actualizaciòn de la cpu", err11)
+				return "Error al realizar la actualizaciòn de la cpu"
+			}
+			_, err1 := db.Exec("UPDATE maquina_virtual set cpu = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Cpu), specs.Nombre)
+			if err1 != nil {
+				log.Println("Error al realizar la actualizaciòn de la CPU", err1)
+				return "Error al realizar la actualizaciòn de la CPU"
+			}
+			fmt.Println("Se modificò con èxito la CPU")
 		}
 	}
 
-	if specs.Ram != 0 {
-		_, err22 := enviarComandoSSH(host.Ip, memoryCommand, config)
-		if err22 != nil {
-			log.Println("Error al realizar la actualizaciòn de la memoria", err22)
-			return "Error al realizar la actualizaciòn de la memoria"
+	if specs.Ram != 0 && specs.Ram != maquinaVirtual.Ram {
+		var ram_host_usada int
+		flagRam := true
+
+		if specs.Ram < maquinaVirtual.Ram {
+			ram_host_usada = host.Ram_usada - (maquinaVirtual.Ram - specs.Ram)
+		} else {
+			ram_host_usada = host.Ram_usada + (specs.Ram - maquinaVirtual.Ram)
+			recDisponibles := validarDisponibilidadRecursosHost(0, (specs.Ram - maquinaVirtual.Ram), host)
+			if !recDisponibles {
+				fmt.Println("No se modificò la ram porque el host no tiene recursos disponibles")
+				flagRam = false
+			}
 		}
-		_, err2 := db.Exec("UPDATE maquina_virtual set ram = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Ram), specs.Nombre)
-		if err2 != nil {
-			log.Println("Error al realizar la actualizaciòn de la memoria en la base de datos", err2)
-			return "Error al realizar la actualizaciòn de la memoria en la base de datos"
+		if flagRam {
+			_, er := db.Exec("UPDATE host SET ram_usada = ? where id = ?", ram_host_usada, host.Id)
+			if er != nil {
+				log.Println("Error al actualizar la ram_usada del host en la base de datos: ", er)
+				return "Error al actualizar el host en la base de datos"
+			}
+			_, err22 := enviarComandoSSH(host.Ip, memoryCommand, config)
+			if err22 != nil {
+				log.Println("Error al realizar la actualizaciòn de la memoria", err22)
+				return "Error al realizar la actualizaciòn de la memoria"
+			}
+			_, err2 := db.Exec("UPDATE maquina_virtual set ram = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Ram), specs.Nombre)
+			if err2 != nil {
+				log.Println("Error al realizar la actualizaciòn de la memoria en la base de datos", err2)
+				return "Error al realizar la actualizaciòn de la memoria en la base de datos"
+			}
+			fmt.Println("Se modificò con èxito la RAM")
 		}
 	}
-
-	fmt.Println("Las modificaciones se realizaron correctamente")
 	return "Modificaciones realizadas con èxito"
 }
 
@@ -1016,11 +1069,12 @@ func apagarMV(nameVM string) string {
 				return "Error al enviar el comando para apagar la MV"
 			}
 		}
-		_, err9 := db.Exec("UPDATE maquina_virtual set estado = 'Apagado' WHERE NOMBRE = ?", nameVM)
+		_, err9 := db.Exec("UPDATE maquina_virtual set estado = 'Apagado', ip = '' WHERE NOMBRE = ?", nameVM)
 		if err9 != nil {
 			log.Println("Error al realizar la actualizaciòn del estado", err9)
 			return "Error al realizar la actualizaciòn del estado"
 		}
+
 		fmt.Println("Màquina apagada con èxito")
 	}
 	return ""
@@ -1239,6 +1293,9 @@ func startVM(nameVM string) string {
 
 		// Obtiene la dirección IP de la máquina virtual después de que se inicie
 		getIpCommand := "VBoxManage guestproperty get " + "\"" + nameVM + "\"" + " /VirtualBox/GuestInfo/Net/0/V4/IP"
+
+		rebootCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " reboot"
+
 		var ipAddress string
 		ipAddress, err6 := enviarComandoSSH(host.Ip, getIpCommand, config)
 		if err6 != nil {
@@ -1246,19 +1303,38 @@ func startVM(nameVM string) string {
 			return "Error al obtener la IP de la MV"
 		}
 		ipAddress = strings.TrimSpace(ipAddress)
+		// Establece un temporizador de espera máximo de 5 minutos
+		maxEspera := time.Now().Add(1 * time.Minute)
+		restarted := false
 
 		for ipAddress == "" || ipAddress == "No value set!" {
 
-			if ipAddress == "No value set!" {
-				time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
-				fmt.Println("Obteniendo dirección IP...")
+			if time.Now().Before(maxEspera) {
+				if ipAddress == "No value set!" {
+					time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
+					fmt.Println("Obteniendo dirección IP...")
+				}
+				ipAddress, err6 = enviarComandoSSH(host.Ip, getIpCommand, config)
+				if err6 != nil {
+					log.Println("Error al obtener la IP de la MV:", err6)
+					return "Error al obtener la IP de la MV"
+				}
+				ipAddress = strings.TrimSpace(ipAddress)
+			} else {
+				if restarted {
+					log.Println("No se logrò obtener la direcciòn IP de la màquina: " + nameVM)
+					return "No se logrò obtener la direcciòn IP, por favor contacta al administrador"
+				}
+				reboot, error := enviarComandoSSH(host.Ip, rebootCommand, config)
+				if error != nil {
+					log.Println("Error al reinciar la MV:", reboot)
+					return "Error al reinciar la MV"
+				}
+				maxEspera = time.Now().Add(1 * time.Minute)
+				restarted = true
+
 			}
-			ipAddress, err6 = enviarComandoSSH(host.Ip, getIpCommand, config)
-			if err6 != nil {
-				log.Println("Error al obtener la IP de la MV:", err6)
-				return "Error al obtener la IP de la MV"
-			}
-			ipAddress = strings.TrimSpace(ipAddress)
+
 		}
 
 		time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
@@ -1399,4 +1475,32 @@ func getDisk(sistema_operativo string, distribucion_sistema_operativo string, id
 		return disco, err
 	}
 	return disco, nil
+}
+
+func validarDisponibilidadRecursosHost(cpuRequerida int, ramRequerida int, host Host) bool {
+
+	recursosDisponibles := false
+
+	var cpuNecesitada int
+	cpuDisponible := float64(host.Cpu_total) * 0.75 //Obtiene el 75% de la cpu total del host
+
+	if cpuRequerida != 0 {
+		cpuNecesitada = cpuRequerida + host.Cpu_usada
+
+	}
+
+	var ramNecesitada int
+	ramDisponible := float64(host.Ram_total) * 0.75 //Obtiene el 75% de la ram total del host
+
+	if ramRequerida != 0 {
+		ramNecesitada = ramRequerida + host.Ram_usada
+	}
+
+	if cpuNecesitada != 0 && cpuNecesitada < int(cpuDisponible) {
+		recursosDisponibles = true
+	}
+	if ramNecesitada != 0 && ramNecesitada < int(ramDisponible) {
+		recursosDisponibles = true
+	}
+	return recursosDisponibles
 }
