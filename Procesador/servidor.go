@@ -127,10 +127,13 @@ Estructura de datos tipo JSON que contiene los campos para representar una MV de
 @Sistema_operativo Representa el tipo de sistema operativo de la Mv
 */
 type Catalogo struct {
-	Id     int
-	Nombre string
-	Ram    int
-	Cpu    int
+	Id                             int
+	Nombre                         string
+	Ram                            int
+	Cpu                            int
+	Sistema_operativo              string
+	Distribucion_sistema_operativo string
+	Arquitectura                   int
 }
 
 // -------------------------
@@ -370,6 +373,31 @@ func manageServer() {
 
 	})
 
+	//Endpoint para consultar el catàlogo
+	http.HandleFunc("/json/consultCatalog", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Se requiere una solicitud Get", http.StatusMethodNotAllowed)
+			return
+		}
+
+		catalogo, err := consultCatalog()
+		if err != nil {
+			log.Printf("Error al consultar el catálogo: %v", err)
+			http.Error(w, "Error interno del servidor", http.StatusInternalServerError)
+			return
+		}
+
+		// Respondemos con la lista de máquinas virtuales en formato JSON
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(catalogo); err != nil {
+			log.Printf("Error al codificar la respuesta JSON: %v", err)
+			http.Error(w, "Error interno del servidor", http.StatusInternalServerError)
+			return
+		}
+
+	})
+
 	//End point para modificar màquinas virtuales
 	http.HandleFunc("/json/modifyVM", func(w http.ResponseWriter, r *http.Request) {
 		// Verifica que la solicitud sea del método POST.
@@ -560,7 +588,7 @@ func checkMaquinasVirtualesQueueChanges() {
 			maquina_virtualesQueue.Queue.Remove(firstElement)
 			mu.Unlock()
 
-			crateVM(firstElement.Value.(Maquina_virtual))
+			go crateVM(firstElement.Value.(Maquina_virtual))
 
 			printMaquinaVirtual(firstElement.Value.(Maquina_virtual), true)
 		}
@@ -680,12 +708,6 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 		log.Println("Error al ejecutar el comando remoto: " + string(output))
 		return "", err
 	}
-
-	// Imprime la salida del comando
-	if strings.TrimSpace(string(output)) != "" {
-		fmt.Println(string(output))
-	}
-
 	return string(output), nil
 }
 
@@ -723,7 +745,16 @@ func crateVM(specs Maquina_virtual) string {
 	var host Host
 	err10 := error
 
-	for !availableResources {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM host").Scan(&count)
+	if err != nil {
+		log.Println("Error al contar los host que hay en la base de datos: " + err.Error())
+		return "Error al contar los gost que hay en la base de datos"
+	}
+
+	count += 5 //Para dar n+5 iteraciones en busca de hosts con recursos disponibles, donde n es el total de hosts guardados en la bse de datos
+
+	for !availableResources && count > 0 {
 		//Selecciona un host al azar
 		host, err10 = selectHost()
 		if err10 != nil {
@@ -731,6 +762,12 @@ func crateVM(specs Maquina_virtual) string {
 			return "Error al seleccionar el host"
 		}
 		availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host)
+		count--
+	}
+
+	if !availableResources {
+		fmt.Println("No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde")
+		return "No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde"
 	}
 
 	disco, err20 := getDisk(specs.Sistema_operativo, specs.Distribucion_sistema_operativo, host.Id)
@@ -1084,81 +1121,72 @@ func apagarMV(nameVM string) string {
  */
 func checkManagementQueueChanges() {
 	for {
-		// Verifica si el tamaño de la cola de especificaciones ha cambiado.
 		mu.Lock()
 		currentQueueSize := managementQueue.Queue.Len()
 		mu.Unlock()
 
 		if currentQueueSize > 0 {
-			// Imprime y elimina el primer elemento de la cola de especificaciones.
 			mu.Lock()
 			firstElement := managementQueue.Queue.Front()
-
-			// Verifica que el primer elemento sea un mapa.
 			data, dataPresent := firstElement.Value.(map[string]interface{})
+			mu.Unlock()
 
 			if !dataPresent {
 				fmt.Println("No se pudo procesar la solicitud")
+				mu.Lock()
+				managementQueue.Queue.Remove(firstElement)
 				mu.Unlock()
-				return
+				continue
 			}
 
-			// Obtiene el valor del campo "tipo_solicitud"
 			tipoSolicitud, _ := data["tipo_solicitud"].(string)
 
-			if strings.ToLower(tipoSolicitud) == "modify" {
+			switch strings.ToLower(tipoSolicitud) {
+			case "modify":
 				specsMap, _ := data["specifications"].(map[string]interface{})
-
-				// Convierte el mapa de especificaciones a un objeto Specifications.
 				specsJSON, err := json.Marshal(specsMap)
 				if err != nil {
 					fmt.Println("Error al serializar las especificaciones:", err)
+					mu.Lock()
+					managementQueue.Queue.Remove(firstElement)
 					mu.Unlock()
-					return
+					continue
 				}
 
 				var specifications Maquina_virtual
 				err = json.Unmarshal(specsJSON, &specifications)
 				if err != nil {
 					fmt.Println("Error al deserializar las especificaciones:", err)
+					mu.Lock()
+					managementQueue.Queue.Remove(firstElement)
 					mu.Unlock()
-					return
+					continue
 				}
 
-				modifyVM(specifications)
-			}
+				go modifyVM(specifications)
 
-			//--------------------------------------------------------------------------------------
-			if strings.ToLower(tipoSolicitud) == "delete" {
-
-				// Obtiene el valor del campo "tipo_solicitud"
+			case "delete":
 				nameVM, _ := data["nombreVM"].(string)
+				go deleteVM(nameVM)
 
-				deleteVM(nameVM)
-			}
-
-			if strings.ToLower(tipoSolicitud) == "start" {
-
-				// Obtiene el valor del campo "tipo_solicitud"
+			case "start":
 				nameVM, _ := data["nombreVM"].(string)
+				go startVM(nameVM)
 
-				startVM(nameVM)
-			}
-
-			if strings.ToLower(tipoSolicitud) == "stop" {
-
-				// Obtiene el valor del campo "tipo_solicitud"
+			case "stop":
 				nameVM, _ := data["nombreVM"].(string)
+				go apagarMV(nameVM)
 
-				apagarMV(nameVM)
+			default:
+				fmt.Println("Tipo de solicitud no válido:", tipoSolicitud)
 			}
 
+			mu.Lock()
 			managementQueue.Queue.Remove(firstElement)
 			mu.Unlock()
 		}
 
-		// Espera un segundo antes de verificar nuevamente.
-		time.Sleep(1 * time.Second)
+		time.Sleep(1 * time.Second) //Espera 1 segundo para volver a verificar la cola
 	}
 }
 
@@ -1190,11 +1218,9 @@ func deleteVM(nameVM string) string {
 
 	//Comando para desconectar el disco de la MV
 	disconnectCommand := "VBoxManage storageattach " + "\"" + nameVM + "\"" + " --storagectl hardisk --port 0 --device 0 --medium none"
-	fmt.Println(disconnectCommand)
 
 	//Comando para eliminar la MV
 	deleteCommand := "VBoxManage unregistervm " + "\"" + nameVM + "\"" + " --delete"
-	fmt.Println(deleteCommand)
 
 	//Variable que contiene el estado de la MV (Encendida o apagada)
 	running, err3 := isRunning(nameVM, host.Ip, config)
@@ -1225,6 +1251,16 @@ func deleteVM(nameVM string) string {
 			log.Println("Error al eliminar el registro de la base de datos: ", err6)
 			return "Error al eliminar el registro de la base de datos"
 		}
+
+		ram_host_usada := host.Ram_usada - maquinaVirtual.Ram
+		cpu_host_usada := host.Cpu_usada - maquinaVirtual.Cpu
+
+		err7 := db.QueryRow("UPDATE host set ram_usada = ?, cpu_usada = ? WHERE id = ?", ram_host_usada, cpu_host_usada, host.Id)
+		if err7 == nil {
+			log.Println("Error al actualizar los recursos usados del host en la base de datos: ", err7)
+			return "Error al actualizar los recursos usados del host en la base de datos"
+		}
+
 	}
 
 	fmt.Println("Màquina eliminada correctamente")
@@ -1282,7 +1318,7 @@ func startVM(nameVM string) string {
 			return "Error al enviar el comando para encender la MV"
 		}
 
-		fmt.Println("Obteniendo direcciòn IP...")
+		fmt.Println("Obteniendo direcciòn IP de la màquina " + nameVM + "...")
 		_, err5 := db.Exec("UPDATE maquina_virtual set estado = 'Procesando' WHERE NOMBRE = ?", nameVM)
 		if err5 != nil {
 			log.Println("Error al realizar la actualizaciòn del estado", err5)
@@ -1312,7 +1348,7 @@ func startVM(nameVM string) string {
 			if time.Now().Before(maxEspera) {
 				if ipAddress == "No value set!" {
 					time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
-					fmt.Println("Obteniendo dirección IP...")
+					fmt.Println("Obteniendo dirección IP de la màquina " + nameVM + "...")
 				}
 				ipAddress, err6 = enviarComandoSSH(host.Ip, getIpCommand, config)
 				if err6 != nil {
@@ -1503,4 +1539,38 @@ func validarDisponibilidadRecursosHost(cpuRequerida int, ramRequerida int, host 
 		recursosDisponibles = true
 	}
 	return recursosDisponibles
+}
+
+func consultCatalog() ([]Catalogo, error) {
+
+	var catalogo Catalogo
+	var listaCatalogo []Catalogo
+
+	query := "SELECT c.id, c.nombre, c.ram, c.cpu, d.sistema_operativo, d.distribucion_sistema_operativo, d.arquitectura FROM catalogo_disco cd JOIN catalogo c ON cd.catalogo_id = c.id JOIN disco d ON cd.disco_id = d.id"
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println("Error al realizar la consulta del catàlogo en la base de datos")
+		return listaCatalogo, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+
+		if err := rows.Scan(&catalogo.Id, &catalogo.Nombre, &catalogo.Ram, &catalogo.Cpu, &catalogo.Sistema_operativo, &catalogo.Distribucion_sistema_operativo, &catalogo.Arquitectura); err != nil {
+			log.Println("Error al obtener la fila")
+			continue
+		}
+		listaCatalogo = append(listaCatalogo, catalogo)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Println("Error al obtener el catàlogo de màquinas virtuales")
+		return listaCatalogo, err
+	}
+
+	if len(listaCatalogo) == 0 {
+		fmt.Println("El catàlogo està vacìo")
+	}
+
+	return listaCatalogo, nil
 }
