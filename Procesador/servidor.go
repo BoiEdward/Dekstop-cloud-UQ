@@ -41,6 +41,7 @@ Estrucutura de datos tipo JSON que contiene los campos necesarios para la gesti�
 @Email Representa el email del usuario
 @Usuario Representa el usuario de la cuenta con el cual puede iniciar sesiìn
 @Contrasenia Representa la contraseña de la cuenta
+@Rol Representa el rol que tiene la persona en la plataforma. Puede ser Estudiante o Administrador
 */
 type Persona struct {
 	Nombre      string
@@ -55,12 +56,16 @@ type Persona struct {
 Estructura de datos tipo JSOn que contiene los datos de una màquina virtual
 @Uuid Representa el uuid de una màqina virtual, el cual es un identificador ùnico
 @Nombre Representa el nombre de la MV
-@Sistema_operativo Representa el tipo de sistema operativo
-@Memoria Representa la cantidad de memoria RAM de la MV
-@Cpu Representa la cantidad de unidades de procesamiento de la MV
-@Estado Representa el estado de la MV (Apagada, Encendida)
-@Hostname Representa el nombre del host de la MV
-@Ip Representa la direcciòn Ip de la MV
+@Ram Representa la cantidad de memoria RAM que tiene la màquina virtual
+@Cpu Representa la cantidad de unidades de procesamiento que tiene la màquina virtial
+@Ip Representa la direcciòn IP de la màquina
+@Estado Representa el estado actual de la MV. Puede ser: Encendido, Apagado ò Procesando. Este ùltimo estado indica que la màquina se està encendiendo o apagando
+@Hostname Representa el nombre del usuario del sistema operativo
+@Persona_email Representa el email de la persona asociada a la MV.
+@Host_id Representa el identificador ùnico de la màquina host en la cual està creada la MV
+@Disco_id Representa el identificador ùnico del disco al cual està conectada la MV
+@Sistema_operativo Represneta el tipo de sistema operativo que tiene la MV. Por ejemplo: Linux o Windows
+@Distribucion_sistema_operativo Representa la distribuciòn del sistema operativo que està usando la MV. Por ejemplo: Debian ò 11 Home
 */
 type Maquina_virtual struct {
 	Uuid                           string
@@ -83,21 +88,23 @@ type Maquina_virtualQueue struct {
 }
 
 /*
---------------------------------------------------------------------
 Estructura de datos tipo JSON que contiene los campos de un host
 @Id Representa el identificador ùnico del host
 @Nombre Representa el nombre del host
 @Mac Representa la direcciòn fìsica del host
-@Memoria Representa la cantidad de memoria RAM que tiene el host
-@Cpu Representa la cantidad de unidades de procesamiento que tiene el host
-@Adaptador_red Representa el nombre del adaptador de red
-@Almacenamiento_total Representa el total de espacio de almacenamiento que tiene el host
-@Estado Representa el estado del host (Disponible Fuera de servicio)
-@Sistema_operativo Representa el tipo de sistema operativo del host
-@Ruta_disco_multi Representa la ubiaciòn del disco multiconexiòn
-@Ruta_llave_ssh Representa la ubiaciòn de la llave ssh pùblica
-@Hostname Representa el nombre del host
 @Ip Representa la direcciòn Ip del host
+@Hostname Representa el nombre del host
+@Ram_total Representa la cantidad total de memoria RAM que tiene el host. Se representa en mb
+@Cpu_total Representa la cantidad de unidades de procesamiento total que tiene el host
+@Almacentamiento_total Representa la cantidad total de almacenamiento del host. Se representa en mb
+@Ram_usada Representa la cantidad total de memoria RAM que està siendo usada por las màquinas virtuales alojadas en el host. Se representa en mb
+@Cpu_usada Representa la cantidad total de unidades de procesamiento que estàn siendo usadas por las MV's alojadas en el host
+@Almacenamiento_usado Representa la cantidad de alamacenamiento que està siendo usado por las MV's alojadas en el host. Se representa en mb
+@Adaptador_red Representa el nombre del adaptador de red del host
+@Estado Representa el estado del host (Disponible o Fuera de servicio)
+@Ruta_llave_ssh_pub Representa la ubiaciòn de la llave ssh pùblica
+@Sistema_operativo Representa el tipo de sistema operativo del host. Por ejemplo: Windows o Mac
+@Distribucion_sistema_operativo Representa el tipo de distribuciòn del sistema operativo que tiene el host. Por ejemplo: 10 Pro o 11 Home
 */
 type Host struct {
 	Id                             int
@@ -119,12 +126,13 @@ type Host struct {
 }
 
 /*
-------------------------------------------------------
 Estructura de datos tipo JSON que contiene los campos para representar una MV del catàlogo
 @Nombre Representa el nombre de la MV
 @Memoria Representa la cantidad de memoria RAM de la MV
 @Cpu Representa la cantidad de unidades de procesamiento de la MV
 @Sistema_operativo Representa el tipo de sistema operativo de la Mv
+@Distribucion_sistema_operativo Representa la distribuciòn del sistema operativo que tiene la màquina del catàlogo
+@Arquitectura Respresenta la arquitectura del sistema operativo. Se presententa en un valor entero. Por ejemplo: 32 o 64
 */
 type Catalogo struct {
 	Id                             int
@@ -136,7 +144,16 @@ type Catalogo struct {
 	Arquitectura                   int
 }
 
-// -------------------------
+/*
+Estructura de datos tipo JSON que representa la informaciòn de los discos que tiene la plataforma Desktop Cloud
+@Id Representa el identificador ùnico del disco en la base de datos. Este identificador es generado automaticamente por la base de datos
+@Nombre Representa el nombre del disco
+@Ruta_ubicacion Representa la ubicaciòn de disco en el host.
+@Sistema_operativo Representa el tipo de sistema operativo que tiene el disco. Por ejemplo: Linux
+@Distribucion_sistema_operativo Representa el tipo de distribuciòn del sistema operativo. Por ejemplo: Debian o Ubuntu
+@arquitectura Representa la arquitectura del sistema operativo. Se representa en un valor entero. Por ejemplo: 32 o 64
+@Host_id Representa el identificador ùnico del host en el cual està ubicado el disco
+*/
 type Disco struct {
 	Id                             int
 	Nombre                         string
@@ -483,7 +500,6 @@ func manageServer() {
 
 	})
 
-	//------------------------------------------------------------------------------------------------------------
 	//End point para encender màquinas virtuales
 	http.HandleFunc("/json/startVM", func(w http.ResponseWriter, r *http.Request) {
 		// Verifica que la solicitud sea del método POST.
@@ -598,25 +614,6 @@ func checkMaquinasVirtualesQueueChanges() {
 	}
 }
 
-/*
-	Funciòn que se encarga de imprimir peticiones
-
-@specs Este paràmetro contiene las especificaciones de la màquina virtual gestionada
-@isCreateVM Variable de tipo booleana que si es verdadera significa que la peticiòn es de crear una màquina virtual. En caso contrario
-indica que la peticiòn es para modificar una màquina virtual
-*/
-func printSpecifications(specs Maquina_virtual, isCreateVM bool) {
-
-	// Imprime las especificaciones recibidas.
-	fmt.Printf("-------------------------\n")
-	fmt.Printf("Nombre de la Máquina: %s\n", specs.Nombre)
-	fmt.Printf("Sistema Operativo: %s\n", specs.Sistema_operativo)
-	fmt.Printf("Distribuciòn SO: %s\n", specs.Distribucion_sistema_operativo)
-	fmt.Printf("Memoria Requerida: %d Mb\n", specs.Ram)
-	fmt.Printf("CPU Requerida: %d núcleos\n", specs.Cpu)
-
-}
-
 func printMaquinaVirtual(specs Maquina_virtual, isCreateVM bool) {
 
 	// Imprime las especificaciones recibidas.
@@ -714,20 +711,13 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 /*
 	Esta funciòn permite enviar los comandos VBoxManage necesarios para crear una nueva màquina virtual
 
-@spects Paràmetro que contiene la configuraciòn enviarda por el usuario para crear la MV
-@hostIP Paràmetro que contiene la direcciòn IP del host--------------------------------------
-@config Paràmetro que contiene la configuraciòn de la conexiòn SSH con el host
+@spects Paràmetro que contiene la configuraciòn enviada por el usuario para crear la MV
 */
 func crateVM(specs Maquina_virtual) string {
 
-	//obtiene el usuario que hace la peticiòn
-	user, error := getUser(specs.Persona_email)
-	if error != nil {
-		log.Println("Error al obtener el usuario:", error)
-		return "Error al obtener el usuario"
-	}
+	caracteres := generateRandomString(4) //Genera 4 caracteres alfanumèricos para concatenarlos al nombre de la MV
 
-	nameVM := specs.Nombre + "_" + user.Nombre
+	nameVM := specs.Nombre + "_" + caracteres
 
 	//Consulta si existe una MV con ese nombre
 	existe, error1 := existVM(nameVM)
@@ -743,8 +733,8 @@ func crateVM(specs Maquina_virtual) string {
 
 	availableResources := false
 	var host Host
-	err10 := error
 
+	//Obtiene la cantidad total de hosts que hay en la base de datos
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM host").Scan(&count)
 	if err != nil {
@@ -754,14 +744,15 @@ func crateVM(specs Maquina_virtual) string {
 
 	count += 5 //Para dar n+5 iteraciones en busca de hosts con recursos disponibles, donde n es el total de hosts guardados en la bse de datos
 
+	//Escoge hosts al azar en busca de alguno que tenga recursos disponibles para crear la MV
 	for !availableResources && count > 0 {
 		//Selecciona un host al azar
-		host, err10 = selectHost()
-		if err10 != nil {
-			log.Println("Error al seleccionar el host:", err10)
+		host, err = selectHost()
+		if err != nil {
+			log.Println("Error al seleccionar el host:", err)
 			return "Error al seleccionar el host"
 		}
-		availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host)
+		availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host) //Verifica si el host tiene recursos disponibles
 		count--
 	}
 
@@ -770,13 +761,14 @@ func crateVM(specs Maquina_virtual) string {
 		return "No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde"
 	}
 
+	//Obtiene el disco que cumpla con los requerimientos del cliente
 	disco, err20 := getDisk(specs.Sistema_operativo, specs.Distribucion_sistema_operativo, host.Id)
 	if err20 != nil {
 		log.Println("Error al obtener el disco:", err20)
 		return "Error al obtener el disco"
 	}
 
-	// Procesa el primer elemento (en este caso, imprime las especificaciones).
+	//Configura la conexiòn SSH con el host
 	config, err := configurarSSH(host.Hostname, *privateKeyPath)
 	if err != nil {
 		log.Println("Error al configurar SSH:", err)
@@ -785,7 +777,6 @@ func crateVM(specs Maquina_virtual) string {
 
 	//Comando para crear una màquina virtual
 	createVM := "VBoxManage createvm --name " + "\"" + nameVM + "\"" + " --ostype " + specs.Distribucion_sistema_operativo + "_" + strconv.Itoa(disco.arquitectura) + " --register"
-	fmt.Println(createVM)
 	uuid, err1 := enviarComandoSSH(host.Ip, createVM, config)
 	if err1 != nil {
 		log.Println("Error al ejecutar el comando para crear y registrar la MV:", err1)
@@ -824,7 +815,7 @@ func crateVM(specs Maquina_virtual) string {
 		return "Error al asignar la cpu a la MV"
 	}
 
-	//comando para poner el adaptador de red en modo puente (Bridge)
+	//Comando para poner el adaptador de red en modo puente (Bridge)
 	redAdapterCommand := "VBoxManage modifyvm " + "\"" + nameVM + "\"" + " --nic1 bridged --bridgeadapter1 " + "\"" + host.Adaptador_red + "\""
 	_, err6 := enviarComandoSSH(host.Ip, redAdapterCommand, config)
 	if err6 != nil {
@@ -832,6 +823,7 @@ func crateVM(specs Maquina_virtual) string {
 		return "Error al configurar el adaptador de red de la MV"
 	}
 
+	//Obtiene el UUID de la màquina virtual creda
 	lines := strings.Split(string(uuid), "\n")
 	for _, line := range lines {
 		if strings.HasPrefix(line, "UUID:") {
@@ -850,6 +842,7 @@ func crateVM(specs Maquina_virtual) string {
 		Persona_email:     specs.Persona_email,
 	}
 
+	//Crea el registro de la nueva MV en la base de datos
 	_, err7 := db.Exec("INSERT INTO maquina_virtual (uuid, nombre,  ram, cpu, ip, estado, hostname, persona_email, host_id, disco_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		nuevaMaquinaVirtual.Uuid, nuevaMaquinaVirtual.Nombre, nuevaMaquinaVirtual.Ram, nuevaMaquinaVirtual.Cpu,
 		nuevaMaquinaVirtual.Ip, nuevaMaquinaVirtual.Estado, nuevaMaquinaVirtual.Hostname, nuevaMaquinaVirtual.Persona_email, host.Id, disco.Id)
@@ -858,9 +851,11 @@ func crateVM(specs Maquina_virtual) string {
 		return "Error al crear el registro en la base de datos"
 	}
 
+	//Calcula la CPU y RAM usada en el host
 	usedCpu := host.Cpu_usada + specs.Cpu
 	usedRam := host.Ram_usada + (specs.Ram)
 
+	//Actualiza la informaciòn de los recursos usados en el host
 	_, err8 := db.Exec("UPDATE host SET ram_usada = ?, cpu_usada = ? where id = ?", usedRam, usedCpu, host.Id)
 	if err8 != nil {
 		log.Println("Error al actualizar el host en la base de datos: ", err8)
@@ -905,14 +900,14 @@ func isRunning(nameVM string, hostIP string, config *ssh.ClientConfig) (bool, er
 }
 
 /* Funciòn que contiene los comandos necesarios para modificar una màquina virtual. Primero verifica
-si la màquina esta encendida o apagada. En caso de que estè encendida, invoca la funciòn para apagar la màquina.
+si la màquina esta encendida o apagada. En caso de que estè encendida, se le notifica el usuario que debe apagar la màquina.
+Tambièn, verifica si el host tiene los recusos necesarios solicitados por el cliente, en caso de que requiera aumentar lso recursos.
 @specs Paràmetro que contiene las especificaciones a modificar en la màquina virtual
-@hostIP Paràmetro que contiene la direcciòn ip del host en el cual està alojada la màquina virtual a modificar
 */
 
 func modifyVM(specs Maquina_virtual) string {
 
-	//Obtiene el objeto "maquina_virtual"
+	//Obtiene la màquina virtual a modificar
 	maquinaVirtual, err1 := getVM(specs.Nombre)
 	if err1 != nil {
 		log.Println("Error al obtener la MV:", err1)
@@ -926,6 +921,7 @@ func modifyVM(specs Maquina_virtual) string {
 		return "Error al obtener el host"
 	}
 
+	//Configura la conexiòn SSH con el host
 	config, err := configurarSSH(host.Hostname, *privateKeyPath)
 	if err != nil {
 		log.Println("Error al configurar SSH:", err)
@@ -958,13 +954,14 @@ func modifyVM(specs Maquina_virtual) string {
 			cpu_host_usada = host.Cpu_usada - (maquinaVirtual.Cpu - specs.Cpu)
 		} else {
 			cpu_host_usada = host.Cpu_usada + (specs.Cpu - maquinaVirtual.Cpu)
-			recDisponibles := validarDisponibilidadRecursosHost((specs.Cpu - maquinaVirtual.Cpu), 0, host)
+			recDisponibles := validarDisponibilidadRecursosHost((specs.Cpu - maquinaVirtual.Cpu), 0, host) //Valida si el host tiene recursos disponibles
 			if !recDisponibles {
 				fmt.Println("No se pudo aumentar la cpu, no hay recursos disponibles en el host")
 				flagCpu = false
 			}
 		}
 		if flagCpu {
+			//ACtualiza la CPU usada en el host
 			_, er := db.Exec("UPDATE host SET cpu_usada = ? where id = ?", cpu_host_usada, host.Id)
 			if er != nil {
 				log.Println("Error al actualizar la cpu_usada del host en la base de datos: ", er)
@@ -975,6 +972,7 @@ func modifyVM(specs Maquina_virtual) string {
 				log.Println("Error al realizar la actualizaciòn de la cpu", err11)
 				return "Error al realizar la actualizaciòn de la cpu"
 			}
+			//Actualiza la CPU que tiene la MV
 			_, err1 := db.Exec("UPDATE maquina_virtual set cpu = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Cpu), specs.Nombre)
 			if err1 != nil {
 				log.Println("Error al realizar la actualizaciòn de la CPU", err1)
@@ -992,13 +990,14 @@ func modifyVM(specs Maquina_virtual) string {
 			ram_host_usada = host.Ram_usada - (maquinaVirtual.Ram - specs.Ram)
 		} else {
 			ram_host_usada = host.Ram_usada + (specs.Ram - maquinaVirtual.Ram)
-			recDisponibles := validarDisponibilidadRecursosHost(0, (specs.Ram - maquinaVirtual.Ram), host)
+			recDisponibles := validarDisponibilidadRecursosHost(0, (specs.Ram - maquinaVirtual.Ram), host) //Valida si el host tiene RAM disponible para realizar el aumento de recursos
 			if !recDisponibles {
 				fmt.Println("No se modificò la ram porque el host no tiene recursos disponibles")
 				flagRam = false
 			}
 		}
 		if flagRam {
+			//Actualiza la RAM usada en el host
 			_, er := db.Exec("UPDATE host SET ram_usada = ? where id = ?", ram_host_usada, host.Id)
 			if er != nil {
 				log.Println("Error al actualizar la ram_usada del host en la base de datos: ", er)
@@ -1009,6 +1008,7 @@ func modifyVM(specs Maquina_virtual) string {
 				log.Println("Error al realizar la actualizaciòn de la memoria", err22)
 				return "Error al realizar la actualizaciòn de la memoria"
 			}
+			//Actualiza la RAM de la MV
 			_, err2 := db.Exec("UPDATE maquina_virtual set ram = ? WHERE NOMBRE = ?", strconv.Itoa(specs.Ram), specs.Nombre)
 			if err2 != nil {
 				log.Println("Error al realizar la actualizaciòn de la memoria en la base de datos", err2)
@@ -1022,31 +1022,28 @@ func modifyVM(specs Maquina_virtual) string {
 
 /* Funciòn que permite enviar los comandos necesarios para apagar una màquina virtual
 @nameVM Paràmetro que contiene el nombre de la màquina virtual a apagar
-@hostIP Paràmetro que contiene la direcciòn ip del host
 */
 
 func apagarMV(nameVM string) string {
 
-	//Obtiene el objeto "maquina_virtual"
+	//Obtiene la màquina vitual a apagar
 	maquinaVirtual, err := getVM(nameVM)
 	if err != nil {
 		log.Println("Error al obtener la MV:", err)
 		return "Error al obtener la MV"
 	}
-
 	//Obtiene el host en el cual està alojada la MV
 	host, err1 := getHost(maquinaVirtual.Host_id)
 	if err1 != nil {
 		log.Println("Error al obtener el host:", err1)
 		return "Error al obtener el host"
 	}
-
+	//Configura la conexiòn SSH con el host
 	config, err2 := configurarSSH(host.Hostname, *privateKeyPath)
 	if err2 != nil {
 		log.Println("Error al configurar SSH:", err2)
 		return "Error al configurar SSH"
 	}
-
 	//Variable que contiene el estado de la MV (Encendida o apagada)
 	running, err3 := isRunning(nameVM, host.Ip, config)
 	if err3 != nil {
@@ -1054,7 +1051,7 @@ func apagarMV(nameVM string) string {
 		return "Error al obtener el estado de la MV"
 	}
 
-	if !running {
+	if !running { //En caso de que la MV estè apagada, entonces se invoca el mètodo para encenderla
 		startVM(nameVM)
 	} else {
 		//Comando para enviar señal de apagado a la MV esperando que los programas cierren correctamente
@@ -1064,18 +1061,18 @@ func apagarMV(nameVM string) string {
 		powerOffCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " poweroff"
 
 		fmt.Println("Apagando màquina " + nameVM + "...")
+		//Actualza el estado de la MV en la base de datos
 		_, err4 := db.Exec("UPDATE maquina_virtual set estado = 'Procesando' WHERE NOMBRE = ?", nameVM)
 		if err4 != nil {
 			log.Println("Error al realizar la actualizaciòn del estado", err4)
 			return "Error al realizar la actualizaciòn del estado"
 		}
-
+		//Envìa el comando para apagar la MV a travès de un ACPI
 		_, err5 := enviarComandoSSH(host.Ip, acpiCommand, config)
 		if err5 != nil {
 			log.Println("Error al enviar el comando para apagar la MV:", err5)
 			return "Error al enviar el comando para apagar la MV"
 		}
-
 		// Establece un temporizador de espera máximo de 5 minutos
 		maxEspera := time.Now().Add(5 * time.Minute)
 
@@ -1089,23 +1086,24 @@ func apagarMV(nameVM string) string {
 			if !status {
 				break
 			}
-
 			// Espera un 1 segundo antes de volver a verificar el estado de la màquina
 			time.Sleep(1 * time.Second)
 		}
 
+		//Consulta si la MV està encendida
 		status, err7 := isRunning(nameVM, host.Ip, config)
 		if err7 != nil {
 			log.Println("Error al obtener el estado de la MV:", err7)
 			return "Error al obtener el estado de la MV"
 		}
 		if status {
-			_, err8 := enviarComandoSSH(host.Ip, powerOffCommand, config)
+			_, err8 := enviarComandoSSH(host.Ip, powerOffCommand, config) //Envìa el comando para apagar la MV a travès de un Power Off
 			if err8 != nil {
 				log.Println("Error al enviar el comando para apagar la MV:", err8)
 				return "Error al enviar el comando para apagar la MV"
 			}
 		}
+		//Actualiza el estado de la MV en la base de datos
 		_, err9 := db.Exec("UPDATE maquina_virtual set estado = 'Apagado', ip = '' WHERE NOMBRE = ?", nameVM)
 		if err9 != nil {
 			log.Println("Error al realizar la actualizaciòn del estado", err9)
@@ -1202,14 +1200,13 @@ func deleteVM(nameVM string) string {
 		log.Println("Error al obtener la MV:", err)
 		return "Error al obtener  la MV"
 	}
-
 	//Obtiene el host en el cual està alojada la MV
 	host, err1 := getHost(maquinaVirtual.Host_id)
 	if err1 != nil {
 		log.Println("Error al obtener el host:", err)
 		return "Error al obtener el host"
 	}
-
+	//Configura la conexiòn SSH con el host
 	config, err2 := configurarSSH(host.Hostname, *privateKeyPath)
 	if err2 != nil {
 		log.Println("Error al configurar SSH:", err2)
@@ -1228,41 +1225,39 @@ func deleteVM(nameVM string) string {
 		log.Println("Error al obtener el estado de la MV:", err3)
 		return "Error al obtener el estado de la MV"
 	}
-
 	if running {
 		fmt.Println("Debe apagar la màquina para eliminarla")
 		return "Debe apagar la màquina para eliminarla"
 
 	} else {
+		//Envìa el comando para desconectar el disco de la MV
 		_, err4 := enviarComandoSSH(host.Ip, disconnectCommand, config)
 		if err4 != nil {
 			log.Println("Error al desconectar el disco de la MV:", err4)
 			return "Error al desconectar el disco de la MV"
 		}
-
+		//Envìa el comando para eliminar la MV del host
 		_, err5 := enviarComandoSSH(host.Ip, deleteCommand, config)
 		if err5 != nil {
 			log.Println("Error al eliminar la MV:", err5)
 			return "Error al eliminar la MV"
 		}
-
+		//Elimina la màquina virtual de la base de datos
 		err6 := db.QueryRow("DELETE FROM maquina_virtual WHERE NOMBRE = ?", nameVM)
 		if err6 == nil {
 			log.Println("Error al eliminar el registro de la base de datos: ", err6)
 			return "Error al eliminar el registro de la base de datos"
 		}
-
+		//Calcula los recursos usados del host, descontando los recursos liberados por la MV eliminada
 		ram_host_usada := host.Ram_usada - maquinaVirtual.Ram
 		cpu_host_usada := host.Cpu_usada - maquinaVirtual.Cpu
-
+		//Actualiza los recursos usados del host en la base de datos
 		err7 := db.QueryRow("UPDATE host set ram_usada = ?, cpu_usada = ? WHERE id = ?", ram_host_usada, cpu_host_usada, host.Id)
 		if err7 == nil {
 			log.Println("Error al actualizar los recursos usados del host en la base de datos: ", err7)
 			return "Error al actualizar los recursos usados del host en la base de datos"
 		}
-
 	}
-
 	fmt.Println("Màquina eliminada correctamente")
 	return "Màquina eliminada correctamente"
 }
@@ -1270,9 +1265,7 @@ func deleteVM(nameVM string) string {
 /*
 Funciòn que permite iniciar una màquina virtual en modo "headless", lo que indica que se inicia en segundo plano
 para que el usuario de la màquina fìsica no se vea afectado
-@specs Contiene las especificaciones de la maquina a encender
-@hostIp Contiene la direcciòn Ip del host en el cual està alojada la MV
-@return Retorna la direcciòn Ip de la màquina virtual
+@nameVM Paràmetro que contiene el nombre de la màquina virtual a encender
 */
 
 func startVM(nameVM string) string {
@@ -1283,14 +1276,13 @@ func startVM(nameVM string) string {
 		log.Println("Error al obtener la MV:", err)
 		return "Error al obtener la MV"
 	}
-
 	//Obtiene el host en el cual està alojada la MV
 	host, err1 := getHost(maquinaVirtual.Host_id)
 	if err1 != nil {
 		log.Println("Error al obtener el host:", err1)
 		return "Error al obtener el host"
 	}
-
+	//Configura la conexiòn SSH con el host
 	config, err2 := configurarSSH(host.Hostname, *privateKeyPath)
 	if err2 != nil {
 		log.Println("Error al configurar SSH:", err2)
@@ -1305,13 +1297,14 @@ func startVM(nameVM string) string {
 	}
 
 	if running {
-		apagarMV(nameVM)
+		apagarMV(nameVM) //En caso de que la MV ya estè encendida, entonces se invoca el mètodo para apagar la MV
 		return ""
 	} else {
 		fmt.Println("Encendiendo la màquina " + nameVM + "...")
 
 		// Comando para encender la máquina virtual
 		startVMCommand := "VBoxManage startvm " + "\"" + nameVM + "\"" + " --type headless"
+		//Envìa el comando para encender la MV en segundo plano
 		_, err4 := enviarComandoSSH(host.Ip, startVMCommand, config)
 		if err4 != nil {
 			log.Println("Error al enviar el comando para encender la MV:", err4)
@@ -1319,6 +1312,7 @@ func startVM(nameVM string) string {
 		}
 
 		fmt.Println("Obteniendo direcciòn IP de la màquina " + nameVM + "...")
+		//Actualiza el estado de la MV en la base de datos
 		_, err5 := db.Exec("UPDATE maquina_virtual set estado = 'Procesando' WHERE NOMBRE = ?", nameVM)
 		if err5 != nil {
 			log.Println("Error al realizar la actualizaciòn del estado", err5)
@@ -1327,78 +1321,70 @@ func startVM(nameVM string) string {
 		// Espera 10 segundos para que la máquina virtual inicie
 		time.Sleep(10 * time.Second)
 
-		// Obtiene la dirección IP de la máquina virtual después de que se inicie
+		//Comando para obtener la dirección IP de la máquina virtual
 		getIpCommand := "VBoxManage guestproperty get " + "\"" + nameVM + "\"" + " /VirtualBox/GuestInfo/Net/0/V4/IP"
-
+		//Comando para reiniciar la MV
 		rebootCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " reboot"
 
 		var ipAddress string
+		//Obtiene la IP de la MV
 		ipAddress, err6 := enviarComandoSSH(host.Ip, getIpCommand, config)
 		if err6 != nil {
 			log.Println("Error al obtener la IP de la MV:", err6)
 			return "Error al obtener la IP de la MV"
 		}
-		ipAddress = strings.TrimSpace(ipAddress)
-		// Establece un temporizador de espera máximo de 5 minutos
-		maxEspera := time.Now().Add(1 * time.Minute)
+		ipAddress = strings.TrimSpace(ipAddress) //Elimina los espacios en blanco
+		// Establece un temporizador de espera máximo de 2 minutos
+		maxEspera := time.Now().Add(2 * time.Minute)
 		restarted := false
 
 		for ipAddress == "" || ipAddress == "No value set!" {
-
 			if time.Now().Before(maxEspera) {
 				if ipAddress == "No value set!" {
 					time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
 					fmt.Println("Obteniendo dirección IP de la màquina " + nameVM + "...")
 				}
+				//Envìa el comando para obtener la IP
 				ipAddress, err6 = enviarComandoSSH(host.Ip, getIpCommand, config)
 				if err6 != nil {
 					log.Println("Error al obtener la IP de la MV:", err6)
 					return "Error al obtener la IP de la MV"
 				}
-				ipAddress = strings.TrimSpace(ipAddress)
+				ipAddress = strings.TrimSpace(ipAddress) //Elimina espacios en blanco al final de la cadena
 			} else {
 				if restarted {
 					log.Println("No se logrò obtener la direcciòn IP de la màquina: " + nameVM)
-					return "No se logrò obtener la direcciòn IP, por favor contacta al administrador"
+					return "No se logrò obtener la direcciòn IP, por favor contacte al administrador"
 				}
+				//Envìa el comando para reiniciar la MV
 				reboot, error := enviarComandoSSH(host.Ip, rebootCommand, config)
 				if error != nil {
 					log.Println("Error al reinciar la MV:", reboot)
 					return "Error al reinciar la MV"
 				}
-				maxEspera = time.Now().Add(1 * time.Minute)
+				maxEspera = time.Now().Add(2 * time.Minute) //Agrega dos minutos de tiempo màximo para obtener la IP cuando se reincia la MV
 				restarted = true
-
 			}
-
-		}
-
-		time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
-		ipAddress, err8 := enviarComandoSSH(host.Ip, getIpCommand, config)
-		if err8 != nil {
-			log.Println("Error al enviar el comando para obtener la IP de la MV:", err8)
-			return "Error al enviar el comando para obtener la IP de la MV"
 		}
 
 		//Almacena solo el valor de la IP quitàndole el texto "Value:"
 		ipAddress = strings.TrimPrefix(ipAddress, "Value:")
 		ipAddress = strings.TrimSpace(ipAddress)
-
+		//Actualiza el estado de la MV en la base de datos
 		_, err9 := db.Exec("UPDATE maquina_virtual set estado = 'Encendido' WHERE NOMBRE = ?", nameVM)
 		if err9 != nil {
 			log.Println("Error al realizar la actualizaciòn del estado", err9)
 			return "Error al realizar la actualizaciòn del estado"
 		}
+		//Actualiza la direcciòn IP de la MV en la base de datos
 		_, err10 := db.Exec("UPDATE maquina_virtual set ip = ? WHERE NOMBRE = ?", ipAddress, nameVM)
 		if err10 != nil {
 			log.Println("Error al realizar la actualizaciòn de la IP", err10)
 			return "Error al realizar la actualizaciòn de la IP"
 		}
 		fmt.Println("Màquina encendida, la direcciòn IP es: " + ipAddress)
-
 		return ipAddress
 	}
-
 }
 
 /*
@@ -1434,6 +1420,11 @@ func selectHost() (Host, error) {
 	return host, nil
 }
 
+/*
+Funciòn que permite conocer si ya existe o no una màquina virtual en la base de datos con el nombre proporcionado.
+@nameVM Paràmetro que representa el nombre de la màquina virtual a buscar
+@Return Retorna true si ya existe una MV con ese nombre, o false en caso contrario
+*/
 func existVM(nameVM string) (bool, error) {
 
 	var existe bool
@@ -1449,6 +1440,11 @@ func existVM(nameVM string) (bool, error) {
 	return existe, err
 }
 
+/*
+Funciòn que permite obtener un host dado su identificador ùnico
+@idHost Paràmetro que representa el identificador ùnico del host a buscar
+@Return Retorna el host encontrado
+*/
 func getHost(idHost int) (Host, error) {
 
 	var host Host
@@ -1461,11 +1457,14 @@ func getHost(idHost int) (Host, error) {
 		}
 		return host, err
 	}
-
 	return host, nil
-
 }
 
+/*
+Funciòn que permite obtener una màquina virtual dado su nombre
+@nameVM Paràmetro que representa el nombre de la màquina virtual a buscar
+@Retorna la màquina virtual en caso de que exista en la base de datos
+*/
 func getVM(nameVM string) (Maquina_virtual, error) {
 
 	var maquinaVirtual Maquina_virtual
@@ -1482,6 +1481,11 @@ func getVM(nameVM string) (Maquina_virtual, error) {
 	return maquinaVirtual, nil
 }
 
+/*
+Funciòn que permite obtener un usuario dado su identificador ùnico, es decir, su email
+@email Paràmetro que representa el email del usuario a buscar
+@Return Retorna el usuario (Persona) en caso de que exista un usuario con ese email
+*/
 func getUser(email string) (Persona, error) {
 
 	var persona Persona
@@ -1494,10 +1498,16 @@ func getUser(email string) (Persona, error) {
 		}
 		return persona, err
 	}
-
 	return persona, nil
 }
 
+/*
+Funciòn que permite obtener un disco que cumpla con los paràmetros especificados
+@sistema_operativo Paràmetro que representa el tipo de sistema operativo que debe tener el disco
+@distribucion_sistema_operativo Paràmetro que representa la distribuciòn del sistema operativo
+@id_host Paràmetro que representa el identificador ùnico del host en el cual se està buscando el disco
+@Return Retorna el disco en caso de que exista y cumpla con las condiciones mencionadas anterormente
+*/
 func getDisk(sistema_operativo string, distribucion_sistema_operativo string, id_host int) (Disco, error) {
 
 	var disco Disco
@@ -1513,6 +1523,13 @@ func getDisk(sistema_operativo string, distribucion_sistema_operativo string, id
 	return disco, nil
 }
 
+/*
+Funciòn que permite validar si un host tiene los recursos (CPU y RAM) que se estàn solicitando
+@cpuRequerida Paràmetro que representa al cantidad de CPU requerida en el host
+@ramRequerida Paràmetro que representa la cantidad de memoria RAM requerdida en el host
+@host Paràmetro que representa el host en el cual se quiere realizar la validaciòn
+@Return Retorna true en caso de que el host tenga libre los recursos solicitados, o false, en caso contrario
+*/
 func validarDisponibilidadRecursosHost(cpuRequerida int, ramRequerida int, host Host) bool {
 
 	recursosDisponibles := false
@@ -1522,7 +1539,6 @@ func validarDisponibilidadRecursosHost(cpuRequerida int, ramRequerida int, host 
 
 	if cpuRequerida != 0 {
 		cpuNecesitada = cpuRequerida + host.Cpu_usada
-
 	}
 
 	var ramNecesitada int
@@ -1541,6 +1557,10 @@ func validarDisponibilidadRecursosHost(cpuRequerida int, ramRequerida int, host 
 	return recursosDisponibles
 }
 
+/*
+Funciòn que permite consultar el catàlogo de servicios de la plataforma
+@Return Retorna un arreglo con los catàlogos disponibles de la plataforma
+*/
 func consultCatalog() ([]Catalogo, error) {
 
 	var catalogo Catalogo
@@ -1573,4 +1593,22 @@ func consultCatalog() ([]Catalogo, error) {
 	}
 
 	return listaCatalogo, nil
+}
+
+/*
+Funciòn que genera una cadena alfanumèrica aleatoria
+@length Paràmetro que contiene la longitud de la cadena a generar.
+@Return Retorna la cadena aleatoria generada
+*/
+func generateRandomString(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+	// seededRand utiliza un generador de números aleatorios con una semilla basada en el tiempo actual en nanosegundos.
+	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	b := make([]byte, length)
+	for i := range b {
+		// Selecciona un carácter aleatorio del conjunto de caracteres
+		b[i] = charset[seededRand.Intn(len(charset))]
+	}
+	return string(b)
 }
