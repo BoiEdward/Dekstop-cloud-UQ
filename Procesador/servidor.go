@@ -39,7 +39,6 @@ Estrucutura de datos tipo JSON que contiene los campos necesarios para la gesti�
 @Nombre Representa el nombre del usuario
 @Apellido Representa el apellido del usuario
 @Email Representa el email del usuario
-@Usuario Representa el usuario de la cuenta con el cual puede iniciar sesiìn
 @Contrasenia Representa la contraseña de la cuenta
 @Rol Representa el rol que tiene la persona en la plataforma. Puede ser Estudiante o Administrador
 */
@@ -47,7 +46,6 @@ type Persona struct {
 	Nombre      string
 	Apellido    string
 	Email       string
-	Usuario     string
 	Contrasenia string
 	Rol         string
 }
@@ -239,8 +237,6 @@ func manageServer() {
 			return
 		}
 
-		fmt.Println(maquina_virtual)
-
 		// Encola las especificaciones.
 		mu.Lock()
 		maquina_virtualesQueue.Queue.PushBack(maquina_virtual)
@@ -321,7 +317,7 @@ func manageServer() {
 		query := "INSERT INTO persona (nombre, apellido, email, contrasenia, rol) VALUES ( ?, ?, ?, ?, ?);"
 		var resultUsername string
 
-		//Consulta en la base de datos si el usuario existe
+		//Registra el usuario en la base de datos
 		a, err := db.Exec(query, persona.Nombre, persona.Apellido, persona.Email, hashedPassword, "Estudiante")
 		fmt.Println(a)
 		if err != nil {
@@ -582,6 +578,23 @@ func manageServer() {
 
 		// Envía una respuesta al cliente.
 		response := map[string]string{"mensaje": "Mensaje JSON para apagar MV recibido correctamente"}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+
+	})
+
+	http.HandleFunc("/json/createGuestMachine", func(w http.ResponseWriter, r *http.Request) {
+		// Verifica que la solicitud sea del método POST.
+		if r.Method != http.MethodPost {
+			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
+			return
+		}
+
+		email := createTempAccount()
+
+		// Envía una respuesta al cliente.
+		response := map[string]string{"mensaje": email}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
@@ -1611,4 +1624,58 @@ func generateRandomString(length int) string {
 		b[i] = charset[seededRand.Intn(len(charset))]
 	}
 	return string(b)
+}
+
+func generateRandomEmail() string {
+
+	email := generateRandomString(5) + "@temp.com"
+	return email
+}
+
+func createTempAccount() string {
+	var persona Persona
+
+	persona.Nombre = "Defualt"
+	persona.Apellido = "Default"
+	persona.Email = generateRandomEmail()
+	persona.Contrasenia = "123"
+	persona.Rol = "Invitado"
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(persona.Contrasenia), bcrypt.DefaultCost)
+	if err != nil {
+		log.Println("Error al encriptar la contraseña:", err)
+		return ""
+	}
+
+	query := "INSERT INTO persona (nombre, apellido, email, contrasenia, rol) VALUES ( ?, ?, ?, ?, ?);"
+
+	//Consulta en la base de datos si el usuario existe
+	_, err1 := db.Exec(query, persona.Nombre, persona.Apellido, persona.Email, hashedPassword, persona.Rol)
+	if err1 != nil {
+		log.Println("Hubo un error al registrar el usuario en la base de datos", err1)
+	}
+
+	createTempVM(persona.Email)
+
+	return persona.Email
+}
+
+func createTempVM(email string) {
+
+	nameVM := "Guest_" + generateRandomString(5)
+
+	maquina_virtual := Maquina_virtual{
+		Nombre:                         nameVM,
+		Sistema_operativo:              "Linux",
+		Distribucion_sistema_operativo: "Debian",
+		Ram:                            512,
+		Cpu:                            1,
+		Persona_email:                  email,
+	}
+
+	// Encola la peticiòn
+	mu.Lock()
+	maquina_virtualesQueue.Queue.PushBack(maquina_virtual)
+	mu.Unlock()
+
 }

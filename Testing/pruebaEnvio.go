@@ -26,9 +26,9 @@ type Maquina_virtual struct {
 func main() {
 	// Inicia una goroutine para enviar mensajes JSON cada segundo.
 	//go sendMessages()
-	//createVMTest()
+	createVMTest()
 	//modifyVMTest()
-	deleteVMTest()
+	//deleteVMTest()
 	//startVMTest()
 	//stopVMTest()
 
