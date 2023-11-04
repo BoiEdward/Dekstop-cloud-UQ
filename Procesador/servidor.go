@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -230,16 +231,16 @@ func manageServer() {
 		}
 
 		// Decodifica el JSON recibido en la solicitud en una estructura Specifications.
-		var maquina_virtual Maquina_virtual
+		var payload map[string]interface{}
 		decoder := json.NewDecoder(r.Body)
-		if err := decoder.Decode(&maquina_virtual); err != nil {
-			http.Error(w, "Error al decodificar JSON de especificaciones", http.StatusBadRequest)
+		if err := decoder.Decode(&payload); err != nil {
+			http.Error(w, "Error al decodificar JSON de la solicitud", http.StatusBadRequest)
 			return
 		}
 
 		// Encola las especificaciones.
 		mu.Lock()
-		maquina_virtualesQueue.Queue.PushBack(maquina_virtual)
+		maquina_virtualesQueue.Queue.PushBack(payload)
 		mu.Unlock()
 
 		fmt.Println("Cantidad de Solicitudes de Especificaciones en la Cola: " + strconv.Itoa(maquina_virtualesQueue.Queue.Len()))
@@ -278,14 +279,37 @@ func manageServer() {
 			fmt.Println("Contraseña correcta")
 		}
 		if err2 != nil {
-			response := map[string]bool{"loginCorrecto": false}
+			response := map[string]interface{}{
+				"loginCorrecto": false,
+				"usuario":       nil,
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(response)
 		} else if err != nil {
 			panic(err.Error())
 		} else {
-			response := map[string]bool{"loginCorrecto": true}
+			// Consulta en la base de datos para obtener los detalles del usuario
+			queryUsuario := "SELECT * FROM persona WHERE email = ?"
+			var usuario Persona
+
+			errUsuario := db.QueryRow(queryUsuario, persona.Email).Scan(&usuario.Email, &usuario.Nombre, &usuario.Apellido, &usuario.Contrasenia, &usuario.Rol)
+			if errUsuario != nil {
+				fmt.Println("Error al obtener detalles del usuario:", errUsuario)
+				response := map[string]interface{}{
+					"loginCorrecto": false,
+					"usuario":       nil,
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+
+			response := map[string]interface{}{
+				"loginCorrecto": true,
+				"usuario":       usuario,
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(response)
@@ -346,36 +370,20 @@ func manageServer() {
 
 		var persona Persona
 		decoder := json.NewDecoder(r.Body)
-		if err := decoder.Decode(&persona); err != nil {
+		if err := decoder.Decode(&persona); err != nil { //Solo llega el email
 			http.Error(w, "Error al decodificar JSON de inicio de sesión", http.StatusBadRequest)
 			return
 		}
 
-		query := "SELECT m.nombre, m.ram, m.cpu, m.ip, m.estado, d.sistema_operativo, d.distribucion_sistema_operativo FROM maquina_virtual as m INNER JOIN disco as d on m.disco_id = d.id WHERE m.persona_email = ?"
-		rows, err := db.Query(query, persona.Email)
-		if err != nil {
-			// Manejar el error
-			return
-		}
-		defer rows.Close()
-
-		var machines []Maquina_virtual
-		for rows.Next() {
-			var machine Maquina_virtual
-			if err := rows.Scan(&machine.Nombre, &machine.Ram, &machine.Cpu, &machine.Ip, &machine.Estado, &machine.Sistema_operativo, &machine.Distribucion_sistema_operativo); err != nil {
-				// Manejar el error al escanear la fila
-				continue
-			}
-			machines = append(machines, machine)
-		}
-
-		if err := rows.Err(); err != nil {
-			// Manejar el error al iterar a través de las filas
+		persona, error := getUser(persona.Email)
+		if error != nil {
 			return
 		}
 
-		if len(machines) == 0 {
-			// No se encontraron máquinas virtuales para el usuario
+		machines, err := consultMachines(persona)
+		if err != nil && err.Error() != "no Machines Found" {
+			fmt.Println(err)
+			log.Println("Error al consultar las màquinas del usuario")
 			return
 		}
 
@@ -532,8 +540,19 @@ func manageServer() {
 		managementQueue.Queue.PushBack(datos)
 		mu.Unlock()
 
+		query := "select estado from maquina_virtual where nombre = ?"
+		var estado string
+
+		//Registra el usuario en la base de datos
+		db.QueryRow(query, nombreVM).Scan(&estado)
+
+		mensaje := "Apagando "
+		if estado == "Apagado" {
+			mensaje = "Encendiendo "
+		}
+
 		// Envía una respuesta al cliente.
-		response := map[string]string{"mensaje": "Mensaje JSON para encender MV recibido correctamente"}
+		response := map[string]string{"mensaje": mensaje}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
@@ -591,7 +610,16 @@ func manageServer() {
 			return
 		}
 
-		email := createTempAccount()
+		var datos map[string]interface{}
+
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&datos); err != nil {
+			http.Error(w, "Error al decodificar el JSON ", http.StatusBadRequest)
+			return
+		}
+
+		clientIP := datos["ip"].(string)
+		email := createTempAccount(clientIP)
 
 		// Envía una respuesta al cliente.
 		response := map[string]string{"mensaje": email}
@@ -614,12 +642,43 @@ func checkMaquinasVirtualesQueueChanges() {
 			// Imprime y elimina el primer elemento de la cola de especificaciones.
 			mu.Lock()
 			firstElement := maquina_virtualesQueue.Queue.Front()
-			maquina_virtualesQueue.Queue.Remove(firstElement)
+			data, dataPresent := firstElement.Value.(map[string]interface{})
+			//maquina_virtualesQueue.Queue.Remove(firstElement)
 			mu.Unlock()
 
-			go crateVM(firstElement.Value.(Maquina_virtual))
+			if !dataPresent {
+				fmt.Println("No se pudo procesar la solicitud")
+				mu.Lock()
+				maquina_virtualesQueue.Queue.Remove(firstElement)
+				mu.Unlock()
+				continue
+			}
 
-			printMaquinaVirtual(firstElement.Value.(Maquina_virtual), true)
+			specsMap, _ := data["specifications"].(map[string]interface{})
+			specsJSON, err := json.Marshal(specsMap)
+			if err != nil {
+				fmt.Println("Error al serializar las especificaciones:", err)
+				mu.Lock()
+				maquina_virtualesQueue.Queue.Remove(firstElement)
+				mu.Unlock()
+				continue
+			}
+
+			var specifications Maquina_virtual
+			err = json.Unmarshal(specsJSON, &specifications)
+			if err != nil {
+				fmt.Println("Error al deserializar las especificaciones:", err)
+				mu.Lock()
+				maquina_virtualesQueue.Queue.Remove(firstElement)
+				mu.Unlock()
+				continue
+			}
+
+			clientIP := data["clientIP"].(string)
+
+			go crateVM(specifications, clientIP)
+			maquina_virtualesQueue.Queue.Remove(firstElement)
+			printMaquinaVirtual(specifications, true)
 		}
 
 		// Espera un segundo antes de verificar nuevamente.
@@ -726,7 +785,7 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 
 @spects Paràmetro que contiene la configuraciòn enviada por el usuario para crear la MV
 */
-func crateVM(specs Maquina_virtual) string {
+func crateVM(specs Maquina_virtual, clientIP string) string {
 
 	caracteres := generateRandomString(4) //Genera 4 caracteres alfanumèricos para concatenarlos al nombre de la MV
 
@@ -744,8 +803,13 @@ func crateVM(specs Maquina_virtual) string {
 		return "Nombre de la MV no disponible"
 	}
 
-	availableResources := false
 	var host Host
+	availableResources := false
+	//-----------------------------
+	host, er := isAHostIp(clientIP) //Consulta si la ip de la peticiòn proviene de un host registrado en la BD
+	if er == nil {                  //nil = El host existe
+		availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host) //Verifica si el host tiene recursos disponibles
+	}
 
 	//Obtiene la cantidad total de hosts que hay en la base de datos
 	var count int
@@ -1037,7 +1101,7 @@ func modifyVM(specs Maquina_virtual) string {
 @nameVM Paràmetro que contiene el nombre de la màquina virtual a apagar
 */
 
-func apagarMV(nameVM string) string {
+func apagarMV(nameVM string, clientIP string) string {
 
 	//Obtiene la màquina vitual a apagar
 	maquinaVirtual, err := getVM(nameVM)
@@ -1065,7 +1129,7 @@ func apagarMV(nameVM string) string {
 	}
 
 	if !running { //En caso de que la MV estè apagada, entonces se invoca el mètodo para encenderla
-		startVM(nameVM)
+		startVM(nameVM, clientIP)
 	} else {
 		//Comando para enviar señal de apagado a la MV esperando que los programas cierren correctamente
 		acpiCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " acpipowerbutton"
@@ -1182,11 +1246,13 @@ func checkManagementQueueChanges() {
 
 			case "start":
 				nameVM, _ := data["nombreVM"].(string)
-				go startVM(nameVM)
+				clientIP, _ := data["clientIP"].(string)
+				go startVM(nameVM, clientIP)
 
 			case "stop":
 				nameVM, _ := data["nombreVM"].(string)
-				go apagarMV(nameVM)
+				clientIP, _ := data["clientIP"].(string)
+				go apagarMV(nameVM, clientIP)
 
 			default:
 				fmt.Println("Tipo de solicitud no válido:", tipoSolicitud)
@@ -1281,7 +1347,7 @@ para que el usuario de la màquina fìsica no se vea afectado
 @nameVM Paràmetro que contiene el nombre de la màquina virtual a encender
 */
 
-func startVM(nameVM string) string {
+func startVM(nameVM string, clientIP string) string {
 
 	//Obtiene el objeto "maquina_virtual"
 	maquinaVirtual, err := getVM(nameVM)
@@ -1310,18 +1376,32 @@ func startVM(nameVM string) string {
 	}
 
 	if running {
-		apagarMV(nameVM) //En caso de que la MV ya estè encendida, entonces se invoca el mètodo para apagar la MV
+		apagarMV(nameVM, clientIP) //En caso de que la MV ya estè encendida, entonces se invoca el mètodo para apagar la MV
 		return ""
 	} else {
 		fmt.Println("Encendiendo la màquina " + nameVM + "...")
 
-		// Comando para encender la máquina virtual
-		startVMCommand := "VBoxManage startvm " + "\"" + nameVM + "\"" + " --type headless"
-		//Envìa el comando para encender la MV en segundo plano
-		_, err4 := enviarComandoSSH(host.Ip, startVMCommand, config)
-		if err4 != nil {
-			log.Println("Error al enviar el comando para encender la MV:", err4)
-			return "Error al enviar el comando para encender la MV"
+		// Comando para encender la máquina virtual en segundo planto
+		startVMHeadlessCommand := "VBoxManage startvm " + "\"" + nameVM + "\"" + " --type headless"
+
+		//Comnado para encender la màquina virtual con GUI
+		startVMGUICommand := "VBoxManage startvm " + "\"" + nameVM + "\""
+
+		_, er := isAHostIp(clientIP) //Verifica si la solicitud se està realizando desde un host registrado en la BD
+		if er == nil {
+			//Envìa el comando para encender la MV con GUI
+			_, err4 := enviarComandoSSH(host.Ip, startVMGUICommand, config)
+			if err4 != nil {
+				log.Println("Error al enviar el comando para encender la MV:", err4)
+				return "Error al enviar el comando para encender la MV"
+			}
+		} else {
+			//Envìa el comando para encender la MV en segundo plano
+			_, err4 := enviarComandoSSH(host.Ip, startVMHeadlessCommand, config)
+			if err4 != nil {
+				log.Println("Error al enviar el comando para encender la MV:", err4)
+				return "Error al enviar el comando para encender la MV"
+			}
 		}
 
 		fmt.Println("Obteniendo direcciòn IP de la màquina " + nameVM + "...")
@@ -1632,11 +1712,11 @@ func generateRandomEmail() string {
 	return email
 }
 
-func createTempAccount() string {
+func createTempAccount(clientIP string) string {
 	var persona Persona
 
-	persona.Nombre = "Defualt"
-	persona.Apellido = "Default"
+	persona.Nombre = "Usuario"
+	persona.Apellido = "Invitado"
 	persona.Email = generateRandomEmail()
 	persona.Contrasenia = "123"
 	persona.Rol = "Invitado"
@@ -1655,17 +1735,15 @@ func createTempAccount() string {
 		log.Println("Hubo un error al registrar el usuario en la base de datos", err1)
 	}
 
-	createTempVM(persona.Email)
+	createTempVM(persona.Email, clientIP)
 
 	return persona.Email
 }
 
-func createTempVM(email string) {
-
-	nameVM := "Guest_" + generateRandomString(5)
+func createTempVM(email string, clientIP string) {
 
 	maquina_virtual := Maquina_virtual{
-		Nombre:                         nameVM,
+		Nombre:                         "Guest",
 		Sistema_operativo:              "Linux",
 		Distribucion_sistema_operativo: "Debian",
 		Ram:                            512,
@@ -1673,9 +1751,85 @@ func createTempVM(email string) {
 		Persona_email:                  email,
 	}
 
+	payload := map[string]interface{}{
+		"specifications": maquina_virtual,
+		"clientIP":       clientIP,
+	}
+
+	jsonData, _ := json.Marshal(payload) //Se codifica en formato JSON
+
+	var decodedPayload map[string]interface{}
+	err := json.Unmarshal(jsonData, &decodedPayload) //Se decodifica para meterlo en la cola
+	if err != nil {
+		fmt.Println("Error al decodificar el JSON:", err)
+		// Manejar el error según tus necesidades
+		return
+	}
+
 	// Encola la peticiòn
 	mu.Lock()
-	maquina_virtualesQueue.Queue.PushBack(maquina_virtual)
+	maquina_virtualesQueue.Queue.PushBack(decodedPayload)
 	mu.Unlock()
+}
 
+func isAHostIp(ip string) (Host, error) {
+
+	var host Host
+	err := db.QueryRow("SELECT * FROM host WHERE ip = ?", ip).Scan(&host.Id, &host.Nombre, &host.Mac, &host.Ip, &host.Hostname,
+		&host.Ram_total, &host.Cpu_total, &host.Almacenamiento_total, &host.Ram_usada, &host.Cpu_usada,
+		&host.Almacenamiento_usado, &host.Adaptador_red, &host.Estado, &host.Ruta_llave_ssh_pub, &host.Sistema_operativo,
+		&host.Distribucion_sistema_operativo)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return host, err
+		}
+		return host, err // Otro error de la base de datos
+	}
+	return host, nil // IP encontrada en la base de datos, devuelve el objeto Host correspondiente
+}
+
+func consultMachines(persona Persona) ([]Maquina_virtual, error) {
+
+	email := persona.Email
+	var query string
+	var rows *sql.Rows
+	var err error
+
+	if persona.Rol == "Administrador" {
+		//Consulta todas las màquinas virtuales de la base de datos
+		query = "SELECT m.nombre, m.ram, m.cpu, m.ip, m.estado, d.sistema_operativo, d.distribucion_sistema_operativo, m.hostname FROM maquina_virtual as m INNER JOIN disco as d on m.disco_id = d.id"
+		rows, err = db.Query(query)
+	} else {
+		//Consulta las màquinas virtuales de un usuario en la base de datos
+		query = "SELECT m.nombre, m.ram, m.cpu, m.ip, m.estado, d.sistema_operativo, d.distribucion_sistema_operativo, m.hostname FROM maquina_virtual as m INNER JOIN disco as d on m.disco_id = d.id WHERE m.persona_email = ?"
+		rows, err = db.Query(query, email)
+	}
+
+	var machines []Maquina_virtual
+
+	if err != nil {
+		log.Println("Error al realizar la consulta de màquinas en la BD", err)
+		return machines, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var machine Maquina_virtual
+		if err := rows.Scan(&machine.Nombre, &machine.Ram, &machine.Cpu, &machine.Ip, &machine.Estado, &machine.Sistema_operativo, &machine.Distribucion_sistema_operativo, &machine.Hostname); err != nil {
+			// Manejar el error al escanear la fila
+			continue
+		}
+		machines = append(machines, machine)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Println("Error al iterar sobre las filas ", err)
+		return machines, err
+	}
+
+	if len(machines) == 0 {
+		// No se encontraron máquinas virtuales para el usuario
+		return machines, errors.New("no Machines Found")
+	}
+	return machines, nil
 }

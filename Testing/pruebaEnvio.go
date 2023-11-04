@@ -26,9 +26,9 @@ type Maquina_virtual struct {
 func main() {
 	// Inicia una goroutine para enviar mensajes JSON cada segundo.
 	//go sendMessages()
-	createVMTest()
+	//createVMTest()
 	//modifyVMTest()
-	//deleteVMTest()
+	deleteVMTest()
 	//startVMTest()
 	//stopVMTest()
 
@@ -116,7 +116,7 @@ func deleteVMTest() {
 	// Crear un mapa que incluye el campo tipo_solicitud y el objeto Specifications
 	payload := map[string]interface{}{
 		"tipo_solicitud": "delete",
-		"nombreVM":       "UqCloud Test_Jhoiner",
+		"nombreVM":       "Test_LjJf",
 	}
 
 	messageJSON, err := json.Marshal(payload)
