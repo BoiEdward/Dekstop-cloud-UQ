@@ -79,6 +79,7 @@ type Maquina_virtual struct {
 	Disco_id                       int
 	Sistema_operativo              string
 	Distribucion_sistema_operativo string
+	Fecha_creacion                 time.Time
 }
 
 type Maquina_virtualQueue struct {
@@ -190,15 +191,30 @@ func main() {
 	// Función que verifica la cola de especificaciones constantemente.
 	go checkMaquinasVirtualesQueueChanges()
 
+	go checkTime()
+
 	// Función que verifica la cola de cuentas constantemente.
 	go checkManagementQueueChanges()
 
 	// Inicia el servidor HTTP en el puerto 8081.
 	fmt.Println("Servidor escuchando en el puerto 8081...")
 	if err := http.ListenAndServe(":8081", nil); err != nil {
-		fmt.Println("Error al iniciar el servidor:", err)
+		log.Println("Error al iniciar el servidor:", err)
 	}
 
+}
+
+func checkTime() {
+	//timeTicker := time.NewTicker(30 * time.Minute) // Ejecutar cada media hora
+	timeTicker := time.NewTicker(time.Minute) // Ejecutar cada media hora
+	fmt.Println(timeTicker)
+
+	for {
+		select {
+		case <-timeTicker.C:
+			go checkMachineTime()
+		}
+	}
 }
 
 // Funciòn que se encarga de realizar la conexiòn a la base de datos
@@ -1559,17 +1575,30 @@ Funciòn que permite obtener una màquina virtual dado su nombre
 @Retorna la màquina virtual en caso de que exista en la base de datos
 */
 func getVM(nameVM string) (Maquina_virtual, error) {
-
 	var maquinaVirtual Maquina_virtual
-	err := db.QueryRow("SELECT * FROM maquina_virtual WHERE nombre = ?", nameVM).Scan(&maquinaVirtual.Uuid, &maquinaVirtual.Nombre, &maquinaVirtual.Ram, &maquinaVirtual.Cpu, &maquinaVirtual.Ip, &maquinaVirtual.Estado, &maquinaVirtual.Hostname, &maquinaVirtual.Persona_email, &maquinaVirtual.Host_id, &maquinaVirtual.Disco_id)
+
+	var fechaCreacionStr string
+	err := db.QueryRow("SELECT * FROM maquina_virtual WHERE nombre = ?", nameVM).Scan(
+		&maquinaVirtual.Uuid, &maquinaVirtual.Nombre, &maquinaVirtual.Ram,
+		&maquinaVirtual.Cpu, &maquinaVirtual.Ip, &maquinaVirtual.Estado,
+		&maquinaVirtual.Hostname, &maquinaVirtual.Persona_email,
+		&maquinaVirtual.Host_id, &maquinaVirtual.Disco_id,
+		&fechaCreacionStr)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			log.Println("No se encontró la màquina virtual con el nombre especificado.")
+			log.Println("No se encontró la máquina virtual con el nombre especificado.")
 		} else {
-			log.Println("Hubo un error al realizar la consulta: ", err)
+			log.Println("Hubo un error al realizar la consulta:", err)
 		}
 		return maquinaVirtual, err
 	}
+
+	fechaCreacion, err := time.Parse("2006-01-02 15:04:05", fechaCreacionStr)
+	if err != nil {
+		log.Println("Error al parsear la fecha de creación:", err)
+		return maquinaVirtual, err
+	}
+	maquinaVirtual.Fecha_creacion = fechaCreacion
 
 	return maquinaVirtual, nil
 }
@@ -1832,4 +1861,94 @@ func consultMachines(persona Persona) ([]Maquina_virtual, error) {
 		return machines, errors.New("no Machines Found")
 	}
 	return machines, nil
+}
+
+func checkMachineTime() {
+	// Obtiene todas las máquinas virtuales de la base de datos
+	maquinas, err := getGuestMachines()
+	if err != nil {
+		log.Println("Error al obtener las máquinas virtuales:", err)
+		return
+	}
+
+	// Obtiene la hora actual
+	horaActual := time.Now()
+
+	for _, maquina := range maquinas {
+		// Calcula la diferencia de tiempo entre la hora actual y la fecha de creación de la máquina
+		diferencia := horaActual.Sub(maquina.Fecha_creacion)
+
+		// Verifica si la máquina ha excedido su tiempo de duración
+		//if diferencia > (2*time.Hour + 20*time.Minute) {
+		if diferencia > (time.Minute) {
+
+			//Obtiene el host en el cual està alojada la MV
+			host, err1 := getHost(maquina.Host_id)
+			if err1 != nil {
+				log.Println("Error al obtener el host:", err)
+				return
+			}
+			//Configura la conexiòn SSH con el host
+			config, err2 := configurarSSH(host.Hostname, *privateKeyPath)
+			if err2 != nil {
+				log.Println("Error al configurar SSH:", err2)
+				return
+			}
+
+			//Variable que contiene el estado de la MV (Encendida o apagada)
+			running, err3 := isRunning(maquina.Nombre, host.Ip, config)
+			if err3 != nil {
+				log.Println("Error al obtener el estado de la MV:", err3)
+				return
+			}
+			if running {
+				apagarMV(maquina.Nombre, "")
+				return
+
+			}
+			deleteVM(maquina.Nombre)
+		}
+	}
+}
+
+func getGuestMachines() ([]Maquina_virtual, error) {
+	var maquinas []Maquina_virtual
+
+	query := "SELECT m.nombre, m.fecha_creacion, m.host_id FROM maquina_virtual m JOIN persona p ON m.persona_email = p.email WHERE p.rol = ?;"
+
+	rows, err := db.Query(query, "Invitado")
+	if err != nil {
+		log.Println("Error al consultar las máquinas de los invitados:", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var machine Maquina_virtual
+		var fechaCreacionStr string
+
+		if err := rows.Scan(&machine.Nombre, &fechaCreacionStr, &machine.Host_id); err != nil {
+			log.Println("Error al escanear la fila:", err)
+			continue
+		}
+
+		// Convierte la cadena de fecha y hora a un tipo de datos time.Time
+		fechaCreacion, err := time.Parse("2006-01-02 15:04:05", fechaCreacionStr)
+		if err != nil {
+			log.Println("Error al convertir la fecha y hora:", err)
+			continue
+		}
+
+		// Asigna la fecha y hora convertida a la estructura Maquina_virtual
+		machine.Fecha_creacion = fechaCreacion
+
+		maquinas = append(maquinas, machine)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Println("Error al iterar sobre las filas:", err)
+		return nil, err
+	}
+
+	return maquinas, nil
 }
