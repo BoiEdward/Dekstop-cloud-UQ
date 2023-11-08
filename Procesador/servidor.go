@@ -205,9 +205,8 @@ func main() {
 }
 
 func checkTime() {
-	//timeTicker := time.NewTicker(30 * time.Minute) // Ejecutar cada media hora
-	timeTicker := time.NewTicker(time.Minute) // Ejecutar cada media hora
-	fmt.Println(timeTicker)
+
+	timeTicker := time.NewTicker(10 * time.Minute) // Ejecutar cada diez minutos
 
 	for {
 		select {
@@ -645,6 +644,63 @@ func manageServer() {
 
 	})
 
+	http.HandleFunc("/json/addHost", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var host Host
+
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&host); err != nil {
+			http.Error(w, "Error al decodificar JSON de especificaciones", http.StatusBadRequest)
+			return
+		}
+
+		fmt.Println(host)
+
+		// Verificar si el nombre de la máquina virtual, la IP del host y el tipo de solicitud están presentes y no son nulos
+		nombre := host.Nombre
+		ip := host.Ip
+
+		query := "insert into host (nombre, mac, ip, hostname, ram_total, cpu_total, almacenamiento_total, adaptador_red, estado, ruta_llave_ssh_pub, sistema_operativo, distribucion_sistema_operativo) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+
+		//Registra el usuario en la base de datos
+		_, err := db.Exec(query, nombre, "0A-A0", ip, "admin", 8, 24, 500, "Adaptador", "Activo", "C:/ProgramData/ssh/administrators_authorized_keys", "Windows", "11 Pro")
+		if err != nil {
+			fmt.Println("Error al registrar el host.")
+
+		} else if err != nil {
+			panic(err.Error())
+		}
+
+		var id_host int
+		erro := db.QueryRow("SELECT id FROM host where nombre = ?", nombre).Scan(&id_host)
+
+		if erro != nil {
+			log.Println("Error al obtener el id del host creado")
+			return
+		}
+
+		query = "insert into disco (nombre, ruta_ubicacion, sistema_operativo, distribucion_sistema_operativo, arquitectura, host_id) values (?, ?, ?, ?, ?, ?);"
+
+		//Registra el usuario en la base de datos
+		_, err = db.Exec(query, "Debian", "C:/NewDebian.vdi", "Linux", "Debian", 64, id_host)
+		if err != nil {
+			log.Println("Error al registrar el disco.")
+			return
+
+		} else if err != nil {
+			panic(err.Error())
+		}
+		fmt.Printf("Registro del host y disco correcto:")
+		response := map[string]bool{"loginCorrecto": true}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+	})
+
 }
 
 func checkMaquinasVirtualesQueueChanges() {
@@ -802,6 +858,34 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 @spects Paràmetro que contiene la configuraciòn enviada por el usuario para crear la MV
 */
 func crateVM(specs Maquina_virtual, clientIP string) string {
+
+	//Obtiene el usuario
+	user, error0 := getUser(specs.Persona_email)
+	if error0 != nil {
+		log.Println("Error al obtener el usuario")
+		return ""
+	}
+
+	//Valida el nùmero de màquinas virtuales que tiene el usuario
+	cantidad, err0 := countUserMachinesCreated(specs.Persona_email)
+	if err0 != nil {
+		log.Println("Error al obtener la cantidad de màquinas que tiene el usuario")
+		return ""
+	}
+
+	if user.Rol == "Estudiante" {
+		if cantidad >= 5 {
+			fmt.Println("El usuario " + user.Nombre + " no puede crear màs de 5 màquinas virtuales.")
+			return "El usuario " + user.Nombre + " no puede crear màs de 5 màquinas virtuales."
+		}
+	}
+
+	if user.Rol == "Invitado" {
+		if cantidad >= 1 {
+			fmt.Println("El usuario invitado no puede crear màs de 1 màquina virtual.")
+			return "El usuario invitado no puede crear màs de 1 màquina virtual."
+		}
+	}
 
 	caracteres := generateRandomString(4) //Genera 4 caracteres alfanumèricos para concatenarlos al nombre de la MV
 
@@ -1447,7 +1531,7 @@ func startVM(nameVM string, clientIP string) string {
 		maxEspera := time.Now().Add(2 * time.Minute)
 		restarted := false
 
-		for ipAddress == "" || ipAddress == "No value set!" {
+		for ipAddress == "" || ipAddress == "No value set!" || strings.HasPrefix(strings.TrimSpace(ipAddress), "169") {
 			if time.Now().Before(maxEspera) {
 				if ipAddress == "No value set!" {
 					time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
@@ -1864,6 +1948,7 @@ func consultMachines(persona Persona) ([]Maquina_virtual, error) {
 }
 
 func checkMachineTime() {
+
 	// Obtiene todas las máquinas virtuales de la base de datos
 	maquinas, err := getGuestMachines()
 	if err != nil {
@@ -1878,9 +1963,8 @@ func checkMachineTime() {
 		// Calcula la diferencia de tiempo entre la hora actual y la fecha de creación de la máquina
 		diferencia := horaActual.Sub(maquina.Fecha_creacion)
 
-		// Verifica si la máquina ha excedido su tiempo de duración
-		//if diferencia > (2*time.Hour + 20*time.Minute) {
-		if diferencia > (time.Minute) {
+		// Verifica si la máquina ha excedido su tiempo de duración, en este caso: 2horas 20minutos
+		if diferencia > (2*time.Hour + 20*time.Minute) {
 
 			//Obtiene el host en el cual està alojada la MV
 			host, err1 := getHost(maquina.Host_id)
@@ -1903,18 +1987,26 @@ func checkMachineTime() {
 			}
 			if running {
 				apagarMV(maquina.Nombre, "")
-				return
-
 			}
 			deleteVM(maquina.Nombre)
+			deleteAccount(maquina.Persona_email)
 		}
+	}
+}
+
+func deleteAccount(email string) {
+
+	//Elimina la cuenta de la base de datos
+	err := db.QueryRow("DELETE FROM persona WHERE email = ?", email)
+	if err == nil {
+		log.Println("Error al eliminar el registro de la base de datos: ", err)
 	}
 }
 
 func getGuestMachines() ([]Maquina_virtual, error) {
 	var maquinas []Maquina_virtual
 
-	query := "SELECT m.nombre, m.fecha_creacion, m.host_id FROM maquina_virtual m JOIN persona p ON m.persona_email = p.email WHERE p.rol = ?;"
+	query := "SELECT m.nombre, m.fecha_creacion, m.host_id, m.persona_email FROM maquina_virtual m JOIN persona p ON m.persona_email = p.email WHERE p.rol = ?;"
 
 	rows, err := db.Query(query, "Invitado")
 	if err != nil {
@@ -1927,7 +2019,7 @@ func getGuestMachines() ([]Maquina_virtual, error) {
 		var machine Maquina_virtual
 		var fechaCreacionStr string
 
-		if err := rows.Scan(&machine.Nombre, &fechaCreacionStr, &machine.Host_id); err != nil {
+		if err := rows.Scan(&machine.Nombre, &fechaCreacionStr, &machine.Host_id, &machine.Persona_email); err != nil {
 			log.Println("Error al escanear la fila:", err)
 			continue
 		}
@@ -1951,4 +2043,17 @@ func getGuestMachines() ([]Maquina_virtual, error) {
 	}
 
 	return maquinas, nil
+}
+
+func countUserMachinesCreated(email string) (int, error) {
+
+	//Obtiene la cantidad total de hosts que hay en la base de datos
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM maquina_virtual where persona_email = ?", email).Scan(&count)
+	if err != nil {
+		log.Println("Error al contar las màquinas del usuario que hay en la base de datos: " + err.Error())
+		return 0, err
+	}
+
+	return count, nil
 }
