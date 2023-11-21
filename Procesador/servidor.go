@@ -191,7 +191,7 @@ func main() {
 	// Función que verifica la cola de especificaciones constantemente.
 	go checkMaquinasVirtualesQueueChanges()
 
-	go checkTime()
+	//go checkTime()
 
 	// Función que verifica la cola de cuentas constantemente.
 	go checkManagementQueueChanges()
@@ -875,7 +875,7 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 func crateVM(specs Maquina_virtual, clientIP string) string {
 
 	//Obtiene el usuario
-	user, error0 := getUser(specs.Persona_email)
+	/*user, error0 := getUser(specs.Persona_email)
 	if error0 != nil {
 		log.Println("Error al obtener el usuario")
 		return ""
@@ -901,6 +901,7 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 			return "El usuario invitado no puede crear màs de 1 màquina virtual."
 		}
 	}
+	*/
 
 	caracteres := generateRandomString(4) //Genera 4 caracteres alfanumèricos para concatenarlos al nombre de la MV
 
@@ -1022,6 +1023,8 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 			uuid = strings.TrimPrefix(line, "UUID:")
 		}
 	}
+	currentTime := time.Now().UTC()
+	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 
 	nuevaMaquinaVirtual := Maquina_virtual{
 		Uuid:              uuid,
@@ -1032,12 +1035,15 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 		Estado:            "Apagado",
 		Hostname:          "uqcloud",
 		Persona_email:     specs.Persona_email,
+		Fecha_creacion:    currentTime,
 	}
+	fmt.Println("Hora actual formateada:", formattedTime)
 
 	//Crea el registro de la nueva MV en la base de datos
-	_, err7 := db.Exec("INSERT INTO maquina_virtual (uuid, nombre,  ram, cpu, ip, estado, hostname, persona_email, host_id, disco_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	_, err7 := db.Exec("INSERT INTO maquina_virtual (uuid, nombre,  ram, cpu, ip, estado, hostname, persona_email, host_id, disco_id, fecha_creacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		nuevaMaquinaVirtual.Uuid, nuevaMaquinaVirtual.Nombre, nuevaMaquinaVirtual.Ram, nuevaMaquinaVirtual.Cpu,
-		nuevaMaquinaVirtual.Ip, nuevaMaquinaVirtual.Estado, nuevaMaquinaVirtual.Hostname, nuevaMaquinaVirtual.Persona_email, host.Id, disco.Id)
+		nuevaMaquinaVirtual.Ip, nuevaMaquinaVirtual.Estado, nuevaMaquinaVirtual.Hostname, nuevaMaquinaVirtual.Persona_email,
+		host.Id, disco.Id, nuevaMaquinaVirtual.Fecha_creacion)
 	if err7 != nil {
 		log.Println("Error al crear el registro en la base de datos:", err7)
 		return "Error al crear el registro en la base de datos"
@@ -1532,16 +1538,10 @@ func startVM(nameVM string, clientIP string) string {
 		//Comando para obtener la dirección IP de la máquina virtual
 		getIpCommand := "VBoxManage guestproperty get " + "\"" + nameVM + "\"" + " /VirtualBox/GuestInfo/Net/0/V4/IP"
 		//Comando para reiniciar la MV
-		rebootCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " reboot"
+		rebootCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " reset"
 
 		var ipAddress string
-		//Obtiene la IP de la MV
-		ipAddress, err6 := enviarComandoSSH(host.Ip, getIpCommand, config)
-		if err6 != nil {
-			log.Println("Error al obtener la IP de la MV:", err6)
-			return "Error al obtener la IP de la MV"
-		}
-		ipAddress = strings.TrimSpace(ipAddress) //Elimina los espacios en blanco
+
 		// Establece un temporizador de espera máximo de 2 minutos
 		maxEspera := time.Now().Add(2 * time.Minute)
 		restarted := false
@@ -1553,15 +1553,28 @@ func startVM(nameVM string, clientIP string) string {
 					fmt.Println("Obteniendo dirección IP de la màquina " + nameVM + "...")
 				}
 				//Envìa el comando para obtener la IP
-				ipAddress, err6 = enviarComandoSSH(host.Ip, getIpCommand, config)
-				if err6 != nil {
-					log.Println("Error al obtener la IP de la MV:", err6)
-					return "Error al obtener la IP de la MV"
-				}
+				ipAddress, _ = enviarComandoSSH(host.Ip, getIpCommand, config)
+
 				ipAddress = strings.TrimSpace(ipAddress) //Elimina espacios en blanco al final de la cadena
+				ipParts := strings.Split(ipAddress, ":")
+				if len(ipParts) > 1 {
+					ipParts := strings.Split(ipParts[1], ".")
+					if strings.TrimSpace(ipParts[0]) == "169" {
+						ipAddress = strings.TrimSpace(ipParts[0])
+						time.Sleep(5 * time.Second) // Espera 5 segundos antes de intentar nuevamente
+						fmt.Println("Obteniendo dirección IP de la màquina " + nameVM + "...")
+					}
+				}
+
 			} else {
 				if restarted {
 					log.Println("No se logrò obtener la direcciòn IP de la màquina: " + nameVM)
+					//Actualiza el estado de la MV en la base de datos
+					_, err9 := db.Exec("UPDATE maquina_virtual set estado = 'Apagado' WHERE NOMBRE = ?", nameVM)
+					if err9 != nil {
+						log.Println("Error al realizar la actualizaciòn del estado", err9)
+						return "Error al realizar la actualizaciòn del estado"
+					}
 					return "No se logrò obtener la direcciòn IP, por favor contacte al administrador"
 				}
 				//Envìa el comando para reiniciar la MV
@@ -1570,6 +1583,7 @@ func startVM(nameVM string, clientIP string) string {
 					log.Println("Error al reinciar la MV:", reboot)
 					return "Error al reinciar la MV"
 				}
+				fmt.Println("Reiniciando la màquina: " + nameVM)
 				maxEspera = time.Now().Add(2 * time.Minute) //Agrega dos minutos de tiempo màximo para obtener la IP cuando se reincia la MV
 				restarted = true
 			}
@@ -1972,7 +1986,7 @@ func checkMachineTime() {
 	}
 
 	// Obtiene la hora actual
-	horaActual := time.Now()
+	horaActual := time.Now().UTC()
 
 	for _, maquina := range maquinas {
 		// Calcula la diferencia de tiempo entre la hora actual y la fecha de creación de la máquina
