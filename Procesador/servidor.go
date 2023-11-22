@@ -191,7 +191,7 @@ func main() {
 	// Función que verifica la cola de especificaciones constantemente.
 	go checkMaquinasVirtualesQueueChanges()
 
-	//go checkTime()
+	go checkTime()
 
 	// Función que verifica la cola de cuentas constantemente.
 	go checkManagementQueueChanges()
@@ -204,9 +204,13 @@ func main() {
 
 }
 
+/*
+Funciòn que establece un disparador cada 10 minutos el cual invoca la funciòn checkMachineTime
+*/
+
 func checkTime() {
 
-	timeTicker := time.NewTicker(10 * time.Minute) // Ejecutar cada diez minutos
+	timeTicker := time.NewTicker(10 * time.Minute) // Se ejecuta cada diez minutos
 
 	for {
 		select {
@@ -357,8 +361,7 @@ func manageServer() {
 		var resultUsername string
 
 		//Registra el usuario en la base de datos
-		a, err := db.Exec(query, persona.Nombre, persona.Apellido, persona.Email, hashedPassword, "Estudiante")
-		fmt.Println(a)
+		_, err = db.Exec(query, persona.Nombre, persona.Apellido, persona.Email, hashedPassword, "Estudiante")
 		if err != nil {
 			fmt.Println("Error al registrar.")
 			response := map[string]bool{"loginCorrecto": false}
@@ -376,7 +379,7 @@ func manageServer() {
 		}
 	})
 
-	//Endpoint para peticiones de inicio de sesiòn
+	//Endpoint para consultar las màquinas virtuales de un usuario
 	http.HandleFunc("/json/consultMachine", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
@@ -869,13 +872,18 @@ func enviarComandoSSH(host string, comando string, config *ssh.ClientConfig) (sa
 
 /*
 	Esta funciòn permite enviar los comandos VBoxManage necesarios para crear una nueva màquina virtual
+	Se encarga de verificar si el usuario aùn puede crear màquinas virtuales, dependiendo de su rol: màximo 5 para estudiantes y màximo 3 para invitados
+	Se encarga de escoger el host dependiendo desde donde se hace la solicitud: algoritmo "here" si se realiza desde un computador que pertenece a los host ò aleatorio en caso contrario
+	Valida si el host que se escogiò tiene recursos disponibles para crear la MV solicitada
+	Finalmente, crea y actualiza los registros necesarios en la base de datos
 
 @spects Paràmetro que contiene la configuraciòn enviada por el usuario para crear la MV
+@clientIP Paràmetro que contiene la direcciòn IP de la màquina desde la cual se està realizando la peticiòn para crear la MV
 */
 func crateVM(specs Maquina_virtual, clientIP string) string {
 
 	//Obtiene el usuario
-	/*user, error0 := getUser(specs.Persona_email)
+	user, error0 := getUser(specs.Persona_email)
 	if error0 != nil {
 		log.Println("Error al obtener el usuario")
 		return ""
@@ -896,12 +904,11 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 	}
 
 	if user.Rol == "Invitado" {
-		if cantidad >= 1 {
+		if cantidad >= 3 {
 			fmt.Println("El usuario invitado no puede crear màs de 1 màquina virtual.")
 			return "El usuario invitado no puede crear màs de 1 màquina virtual."
 		}
 	}
-	*/
 
 	caracteres := generateRandomString(4) //Genera 4 caracteres alfanumèricos para concatenarlos al nombre de la MV
 
@@ -921,7 +928,6 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 
 	var host Host
 	availableResources := false
-	//-----------------------------
 	host, er := isAHostIp(clientIP) //Consulta si la ip de la peticiòn proviene de un host registrado en la BD
 	if er == nil {                  //nil = El host existe
 		availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host) //Verifica si el host tiene recursos disponibles
@@ -1848,11 +1854,22 @@ func generateRandomString(length int) string {
 	return string(b)
 }
 
+/*
+Funciòn que se encarga de generar un correo aleatorio para las cuentas de lo sinvitados las cuales son temporales
+*/
+
 func generateRandomEmail() string {
 
 	email := generateRandomString(5) + "@temp.com"
 	return email
 }
+
+/*
+Funciòn que se encarga de crear cuentas temporales para usuarios invitados
+Cuando se crea la cuenta e ingresa a la base de datos, se encarga de invocar la funciòn para crear una màquina virtual temporal.
+
+@clientIP Paràmetro que contiene la direcciòn IP desde la cual se està realizando la solicitud de crear la cuenta temporal
+*/
 
 func createTempAccount(clientIP string) string {
 	var persona Persona
@@ -1860,7 +1877,7 @@ func createTempAccount(clientIP string) string {
 	persona.Nombre = "Usuario"
 	persona.Apellido = "Invitado"
 	persona.Email = generateRandomEmail()
-	persona.Contrasenia = "123"
+	persona.Contrasenia = "GuestUqcloud"
 	persona.Rol = "Invitado"
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(persona.Contrasenia), bcrypt.DefaultCost)
@@ -1881,6 +1898,15 @@ func createTempAccount(clientIP string) string {
 
 	return persona.Email
 }
+
+/*
+Funciòn que permite crear màquina virtuales temporales para los usuarios con rol "invitado"
+Esta funciòn crea las especificaciones para crear una màquina virtual con recursos mìnimos
+finalmente encola la solicitud de creaciòn
+
+@email Paràmetro que contiene el email del usuario al cual le va a pertencer la MV
+@clientIP Paràmetro que contiene la direcciòn IP desde la cual se està generando la peticiòn
+*/
 
 func createTempVM(email string, clientIP string) {
 
@@ -1914,6 +1940,13 @@ func createTempVM(email string, clientIP string) {
 	mu.Unlock()
 }
 
+/*
+Funciòn que dada una direcciòn IP permite conocer si pertenece o no a un host registrado en la base de datos.
+
+@ip Paràmetro que contiene la direcciòn IP a consultar
+
+@Return Retorna el host en caso de que la IP estè en la base de datos
+*/
 func isAHostIp(ip string) (Host, error) {
 
 	var host Host
@@ -1929,6 +1962,12 @@ func isAHostIp(ip string) (Host, error) {
 	}
 	return host, nil // IP encontrada en la base de datos, devuelve el objeto Host correspondiente
 }
+
+/*
+Funciòn que permite conocer las màquinas virtuales que tiene creadas un usuario ò todas las màquinas de la plataforma si es un administrador
+@persona Paràmetro que representa un usuario, al cual se le van a buscar las màquinas que le pertenece
+@return Retorna un arreglo con las màquinas que le pertenecen al usuario.
+*/
 
 func consultMachines(persona Persona) ([]Maquina_virtual, error) {
 
@@ -1976,6 +2015,11 @@ func consultMachines(persona Persona) ([]Maquina_virtual, error) {
 	return machines, nil
 }
 
+/*
+Funciòn que verifica el tiempo de creaciòn de las màquinas de los usuarios invitados con el fin de determinar si se ha pasado o no del tiempo lìmite (2.5horas)
+En caso de que una màquina se haya pasado del tiempo, se procederà a eliminarla.
+*/
+
 func checkMachineTime() {
 
 	// Obtiene todas las máquinas virtuales de la base de datos
@@ -2018,10 +2062,14 @@ func checkMachineTime() {
 				apagarMV(maquina.Nombre, "")
 			}
 			deleteVM(maquina.Nombre)
-			deleteAccount(maquina.Persona_email)
 		}
 	}
 }
+
+/*
+Funciòn que permite eliminar una cuenta de un usuario de la base de datos
+@email Paràmetro que contiene el email del usuario a eliminar
+*/
 
 func deleteAccount(email string) {
 
@@ -2031,6 +2079,11 @@ func deleteAccount(email string) {
 		log.Println("Error al eliminar el registro de la base de datos: ", err)
 	}
 }
+
+/*
+Funciòn que permite obtener todas las màquinas virtuales creadas en la plataforma por los usuarios con rol invitado
+@return Retorna un arreglo con todas las màquinas encontradas
+*/
 
 func getGuestMachines() ([]Maquina_virtual, error) {
 	var maquinas []Maquina_virtual
@@ -2074,6 +2127,12 @@ func getGuestMachines() ([]Maquina_virtual, error) {
 	return maquinas, nil
 }
 
+/*
+Funciòn que permite conocer el total de màquianas virtuales que tiene creadas un usuario
+@email Paràmetro que contiene el email del usuario al cual se le va a contar las mpaquinas que tiene creadas
+@return retorna un entero con el nùmero de màquinas creadas
+*/
+
 func countUserMachinesCreated(email string) (int, error) {
 
 	//Obtiene la cantidad total de hosts que hay en la base de datos
@@ -2086,6 +2145,11 @@ func countUserMachinesCreated(email string) (int, error) {
 
 	return count, nil
 }
+
+/*
+Funciòn que se encarga de obtener diversas mètricas para el monitoreo de la plataforma
+@return Retorna un mapa con los valores obtenidos en las consultas realizadas a la base de datos
+*/
 
 func getMetrics() (map[string]interface{}, error) {
 
