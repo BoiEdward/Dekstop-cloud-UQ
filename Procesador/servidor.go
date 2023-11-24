@@ -890,24 +890,24 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 	}
 
 	//Valida el nùmero de màquinas virtuales que tiene el usuario
-	cantidad, err0 := countUserMachinesCreated(specs.Persona_email)
+	/*cantidad, err0 := countUserMachinesCreated(specs.Persona_email)
 	if err0 != nil {
 		log.Println("Error al obtener la cantidad de màquinas que tiene el usuario")
 		return ""
-	}
+	}*/
 
 	if user.Rol == "Estudiante" {
-		if cantidad >= 5 {
+		/*if cantidad >= 5 {
 			fmt.Println("El usuario " + user.Nombre + " no puede crear màs de 5 màquinas virtuales.")
 			return "El usuario " + user.Nombre + " no puede crear màs de 5 màquinas virtuales."
-		}
+		}*/
 	}
 
 	if user.Rol == "Invitado" {
-		if cantidad >= 3 {
+		/*if cantidad >= 3 {
 			fmt.Println("El usuario invitado no puede crear màs de 1 màquina virtual.")
 			return "El usuario invitado no puede crear màs de 1 màquina virtual."
-		}
+		}*/
 	}
 
 	caracteres := generateRandomString(4) //Genera 4 caracteres alfanumèricos para concatenarlos al nombre de la MV
@@ -1030,7 +1030,6 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 		}
 	}
 	currentTime := time.Now().UTC()
-	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 
 	nuevaMaquinaVirtual := Maquina_virtual{
 		Uuid:              uuid,
@@ -1043,7 +1042,6 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 		Persona_email:     specs.Persona_email,
 		Fecha_creacion:    currentTime,
 	}
-	fmt.Println("Hora actual formateada:", formattedTime)
 
 	//Crea el registro de la nueva MV en la base de datos
 	_, err7 := db.Exec("INSERT INTO maquina_virtual (uuid, nombre,  ram, cpu, ip, estado, hostname, persona_email, host_id, disco_id, fecha_creacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1067,6 +1065,7 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 	}
 
 	fmt.Println("Màquina virtual creada con èxito")
+	startVM(nameVM, clientIP)
 	return "Màquina virtual creada con èxito"
 }
 
@@ -2241,4 +2240,10 @@ func getMetrics() (map[string]interface{}, error) {
 	metricas["total_CPU_usada"] = total_CPU_usada
 
 	return metricas, nil
+}
+
+func isTempEmail(email string) bool {
+	expresionRegular := `^[a-zA-Z0-9]{5}@temp\.com$`
+	regex := regexp.MustCompile(expresionRegular)
+	return regex.MatchString(email)
 }
