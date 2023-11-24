@@ -191,7 +191,7 @@ func main() {
 	// Función que verifica la cola de especificaciones constantemente.
 	go checkMaquinasVirtualesQueueChanges()
 
-	go checkTime()
+	//go checkTime()
 
 	// Función que verifica la cola de cuentas constantemente.
 	go checkManagementQueueChanges()
