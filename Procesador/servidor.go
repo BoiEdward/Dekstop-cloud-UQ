@@ -926,38 +926,46 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 		return "Nombre de la MV no disponible"
 	}
 
+	var flag bool //Variable para saber si la màquina se creò con el algoritmo "here"
 	var host Host
 	availableResources := false
 	host, er := isAHostIp(clientIP) //Consulta si la ip de la peticiòn proviene de un host registrado en la BD
 	if er == nil {                  //nil = El host existe
 		availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host) //Verifica si el host tiene recursos disponibles
+		flag = true
 	}
 
-	//Obtiene la cantidad total de hosts que hay en la base de datos
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM host").Scan(&count)
-	if err != nil {
-		log.Println("Error al contar los host que hay en la base de datos: " + err.Error())
-		return "Error al contar los gost que hay en la base de datos"
-	}
-
-	count += 5 //Para dar n+5 iteraciones en busca de hosts con recursos disponibles, donde n es el total de hosts guardados en la bse de datos
-
-	//Escoge hosts al azar en busca de alguno que tenga recursos disponibles para crear la MV
-	for !availableResources && count > 0 {
-		//Selecciona un host al azar
-		host, err = selectHost()
+	if flag {
+		maxRam, maxCpu := getMaxResourcesAvailables(host)
+		specs.Ram = maxRam
+		specs.Cpu = maxCpu
+	} else {
+		//Obtiene la cantidad total de hosts que hay en la base de datos
+		var count int
+		err := db.QueryRow("SELECT COUNT(*) FROM host").Scan(&count)
 		if err != nil {
-			log.Println("Error al seleccionar el host:", err)
-			return "Error al seleccionar el host"
+			log.Println("Error al contar los host que hay en la base de datos: " + err.Error())
+			return "Error al contar los gost que hay en la base de datos"
 		}
-		availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host) //Verifica si el host tiene recursos disponibles
-		count--
-	}
 
-	if !availableResources {
-		fmt.Println("No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde")
-		return "No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde"
+		count += 5 //Para dar n+5 iteraciones en busca de hosts con recursos disponibles, donde n es el total de hosts guardados en la bse de datos
+
+		//Escoge hosts al azar en busca de alguno que tenga recursos disponibles para crear la MV
+		for !availableResources && count > 0 {
+			//Selecciona un host al azar
+			host, err = selectHost()
+			if err != nil {
+				log.Println("Error al seleccionar el host:", err)
+				return "Error al seleccionar el host"
+			}
+			availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host) //Verifica si el host tiene recursos disponibles
+			count--
+		}
+
+		if !availableResources {
+			fmt.Println("No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde")
+			return "No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde"
+		}
 	}
 
 	//Obtiene el disco que cumpla con los requerimientos del cliente
@@ -2246,4 +2254,31 @@ func isTempEmail(email string) bool {
 	expresionRegular := `^[a-zA-Z0-9]{5}@temp\.com$`
 	regex := regexp.MustCompile(expresionRegular)
 	return regex.MatchString(email)
+}
+
+func getMaxResourcesAvailables(host Host) (int, int) {
+
+	// Calcula el 75% de la RAM total
+	ramDisponible := int(float64(host.Ram_total) * 0.75)
+
+	// Resta la RAM usada
+	ramDisponible -= host.Ram_usada
+
+	// Asegura que la RAM disponible no sea negativa
+	if ramDisponible < 0 {
+		ramDisponible = 0
+	}
+
+	// Calcula el 75% de la CPU total
+	cpuDisponible := int(float64(host.Cpu_total) * 0.75)
+
+	// Resta la CPU utilizada
+	cpuDisponible -= host.Cpu_usada
+
+	// Asegura que la CPU disponible no sea negativa
+	if cpuDisponible < 0 {
+		cpuDisponible = 0
+	}
+
+	return ramDisponible, cpuDisponible
 }
