@@ -637,7 +637,8 @@ func manageServer() {
 		}
 
 		clientIP := datos["ip"].(string)
-		email := createTempAccount(clientIP)
+		distribucion_SO := datos["distribucion"].(string)
+		email := createTempAccount(clientIP, distribucion_SO)
 
 		// Envía una respuesta al cliente.
 		response := map[string]string{"mensaje": email}
@@ -661,42 +662,39 @@ func manageServer() {
 			return
 		}
 
-		// Verificar si el nombre de la máquina virtual, la IP del host y el tipo de solicitud están presentes y no son nulos
-		nombre := host.Nombre
-		ip := host.Ip
-
 		query := "insert into host (nombre, mac, ip, hostname, ram_total, cpu_total, almacenamiento_total, adaptador_red, estado, ruta_llave_ssh_pub, sistema_operativo, distribucion_sistema_operativo) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 		//Registra el usuario en la base de datos
-		_, err := db.Exec(query, nombre, "0A-A0", ip, "admin", 8, 24, 500, "Adaptador", "Activo", "C:/ProgramData/ssh/administrators_authorized_keys", "Windows", "11 Pro")
+		_, err := db.Exec(query, host.Nombre, host.Mac, host.Ip, host.Hostname, host.Ram_total, host.Cpu_total, host.Almacenamiento_total, host.Adaptador_red, "Activo", host.Ruta_llave_ssh_pub, host.Sistema_operativo, host.Distribucion_sistema_operativo)
 		if err != nil {
 			fmt.Println("Error al registrar el host.")
 
 		} else if err != nil {
 			panic(err.Error())
 		}
+		/*
+			var id_host int
+			erro := db.QueryRow("SELECT id FROM host where nombre = ?", nombre).Scan(&id_host)
 
-		var id_host int
-		erro := db.QueryRow("SELECT id FROM host where nombre = ?", nombre).Scan(&id_host)
+			if erro != nil {
+				log.Println("Error al obtener el id del host creado")
+				return
+			}
 
-		if erro != nil {
-			log.Println("Error al obtener el id del host creado")
-			return
-		}
+			query = "insert into disco (nombre, ruta_ubicacion, sistema_operativo, distribucion_sistema_operativo, arquitectura, host_id) values (?, ?, ?, ?, ?, ?);"
 
-		query = "insert into disco (nombre, ruta_ubicacion, sistema_operativo, distribucion_sistema_operativo, arquitectura, host_id) values (?, ?, ?, ?, ?, ?);"
 
-		//Registra el usuario en la base de datos
-		_, err = db.Exec(query, "Debian", "C:/NewDebian.vdi", "Linux", "Debian", 64, id_host)
-		if err != nil {
-			log.Println("Error al registrar el disco.")
-			return
+			_, err = db.Exec(query, "Debian", "C:/NewDebian.vdi", "Linux", "Debian", 64, id_host)
+			if err != nil {
+				log.Println("Error al registrar el disco.")
+				return
 
-		} else if err != nil {
-			panic(err.Error())
-		}
-		fmt.Println("Registro del host y disco correcto:")
-		response := map[string]bool{"loginCorrecto": true}
+			} else if err != nil {
+				panic(err.Error())
+			}
+		*/
+		fmt.Println("Registro del host correcto:")
+		response := map[string]bool{"registroCorrecto": true}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
@@ -926,46 +924,38 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 		return "Nombre de la MV no disponible"
 	}
 
-	var flag bool //Variable para saber si la màquina se creò con el algoritmo "here"
 	var host Host
 	availableResources := false
 	host, er := isAHostIp(clientIP) //Consulta si la ip de la peticiòn proviene de un host registrado en la BD
 	if er == nil {                  //nil = El host existe
 		availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host) //Verifica si el host tiene recursos disponibles
-		flag = true
 	}
 
-	if flag {
-		maxRam, maxCpu := getMaxResourcesAvailables(host)
-		specs.Ram = maxRam
-		specs.Cpu = maxCpu
-	} else {
-		//Obtiene la cantidad total de hosts que hay en la base de datos
-		var count int
-		err := db.QueryRow("SELECT COUNT(*) FROM host").Scan(&count)
+	//Obtiene la cantidad total de hosts que hay en la base de datos
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM host").Scan(&count)
+	if err != nil {
+		log.Println("Error al contar los host que hay en la base de datos: " + err.Error())
+		return "Error al contar los gost que hay en la base de datos"
+	}
+
+	count += 5 //Para dar n+5 iteraciones en busca de hosts con recursos disponibles, donde n es el total de hosts guardados en la bse de datos
+
+	//Escoge hosts al azar en busca de alguno que tenga recursos disponibles para crear la MV
+	for !availableResources && count > 0 {
+		//Selecciona un host al azar
+		host, err = selectHost()
 		if err != nil {
-			log.Println("Error al contar los host que hay en la base de datos: " + err.Error())
-			return "Error al contar los gost que hay en la base de datos"
+			log.Println("Error al seleccionar el host:", err)
+			return "Error al seleccionar el host"
 		}
+		availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host) //Verifica si el host tiene recursos disponibles
+		count--
+	}
 
-		count += 5 //Para dar n+5 iteraciones en busca de hosts con recursos disponibles, donde n es el total de hosts guardados en la bse de datos
-
-		//Escoge hosts al azar en busca de alguno que tenga recursos disponibles para crear la MV
-		for !availableResources && count > 0 {
-			//Selecciona un host al azar
-			host, err = selectHost()
-			if err != nil {
-				log.Println("Error al seleccionar el host:", err)
-				return "Error al seleccionar el host"
-			}
-			availableResources = validarDisponibilidadRecursosHost(specs.Cpu, specs.Ram, host) //Verifica si el host tiene recursos disponibles
-			count--
-		}
-
-		if !availableResources {
-			fmt.Println("No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde")
-			return "No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde"
-		}
+	if !availableResources {
+		fmt.Println("No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde")
+		return "No hay recursos disponibles el Desktop Cloud para crear la màquina virtual. Intente màs tarde"
 	}
 
 	//Obtiene el disco que cumpla con los requerimientos del cliente
@@ -983,7 +973,7 @@ func crateVM(specs Maquina_virtual, clientIP string) string {
 	}
 
 	//Comando para crear una màquina virtual
-	createVM := "VBoxManage createvm --name " + "\"" + nameVM + "\"" + " --ostype " + specs.Distribucion_sistema_operativo + "_" + strconv.Itoa(disco.arquitectura) + " --register"
+	createVM := "VBoxManage createvm --name " + "\"" + nameVM + "\"" + " --ostype " + disco.Distribucion_sistema_operativo + "_" + strconv.Itoa(disco.arquitectura) + " --register"
 	uuid, err1 := enviarComandoSSH(host.Ip, createVM, config)
 	if err1 != nil {
 		log.Println("Error al ejecutar el comando para crear y registrar la MV:", err1)
@@ -1266,7 +1256,7 @@ func apagarMV(nameVM string, clientIP string) string {
 		startVM(nameVM, clientIP)
 	} else {
 		//Comando para enviar señal de apagado a la MV esperando que los programas cierren correctamente
-		acpiCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " acpipowerbutton"
+		//acpiCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " acpipowerbutton"
 
 		//Comando para apagar la màquina sin esperar que los programas cierren
 		powerOffCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " poweroff"
@@ -1279,7 +1269,7 @@ func apagarMV(nameVM string, clientIP string) string {
 			return "Error al realizar la actualizaciòn del estado"
 		}
 		//Envìa el comando para apagar la MV a travès de un ACPI
-		_, err5 := enviarComandoSSH(host.Ip, acpiCommand, config)
+		_, err5 := enviarComandoSSH(host.Ip, powerOffCommand, config)
 		if err5 != nil {
 			log.Println("Error al enviar el comando para apagar la MV:", err5)
 			return "Error al enviar el comando para apagar la MV"
@@ -1759,7 +1749,8 @@ Funciòn que permite obtener un disco que cumpla con los paràmetros especificad
 func getDisk(sistema_operativo string, distribucion_sistema_operativo string, id_host int) (Disco, error) {
 
 	var disco Disco
-	err := db.QueryRow("Select * from disco where sistema_operativo = ? and distribucion_sistema_operativo =? and host_id = ?", sistema_operativo, distribucion_sistema_operativo, id_host).Scan(&disco.Id, &disco.Nombre, &disco.Ruta_ubicacion, &disco.Sistema_operativo, &disco.Distribucion_sistema_operativo, &disco.arquitectura, &disco.Host_id)
+	//err := db.QueryRow("Select * from disco where sistema_operativo = ? and distribucion_sistema_operativo =? and host_id = ?", sistema_operativo, distribucion_sistema_operativo, id_host).Scan(&disco.Id, &disco.Nombre, &disco.Ruta_ubicacion, &disco.Sistema_operativo, &disco.Distribucion_sistema_operativo, &disco.arquitectura, &disco.Host_id)
+	err := db.QueryRow("Select * from disco where sistema_operativo = ? and nombre =? and host_id = ?", sistema_operativo, distribucion_sistema_operativo, id_host).Scan(&disco.Id, &disco.Nombre, &disco.Ruta_ubicacion, &disco.Sistema_operativo, &disco.Distribucion_sistema_operativo, &disco.arquitectura, &disco.Host_id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			log.Println("No se encontrò un disco: " + sistema_operativo + " " + distribucion_sistema_operativo)
@@ -1878,7 +1869,7 @@ Cuando se crea la cuenta e ingresa a la base de datos, se encarga de invocar la 
 @clientIP Paràmetro que contiene la direcciòn IP desde la cual se està realizando la solicitud de crear la cuenta temporal
 */
 
-func createTempAccount(clientIP string) string {
+func createTempAccount(clientIP string, distribucion_SO string) string {
 	var persona Persona
 
 	persona.Nombre = "Usuario"
@@ -1901,7 +1892,7 @@ func createTempAccount(clientIP string) string {
 		log.Println("Hubo un error al registrar el usuario en la base de datos", err1)
 	}
 
-	createTempVM(persona.Email, clientIP)
+	createTempVM(persona.Email, clientIP, distribucion_SO)
 
 	return persona.Email
 }
@@ -1915,14 +1906,14 @@ finalmente encola la solicitud de creaciòn
 @clientIP Paràmetro que contiene la direcciòn IP desde la cual se està generando la peticiòn
 */
 
-func createTempVM(email string, clientIP string) {
+func createTempVM(email string, clientIP string, distribucion_SO string) {
 
 	maquina_virtual := Maquina_virtual{
 		Nombre:                         "Guest",
 		Sistema_operativo:              "Linux",
-		Distribucion_sistema_operativo: "Debian",
-		Ram:                            512,
-		Cpu:                            1,
+		Distribucion_sistema_operativo: distribucion_SO,
+		Ram:                            1024,
+		Cpu:                            2,
 		Persona_email:                  email,
 	}
 
@@ -2242,8 +2233,8 @@ func getMetrics() (map[string]interface{}, error) {
 	metricas["total_usuarios"] = total_usuarios
 	metricas["total_estudiantes"] = total_estudiantes
 	metricas["total_invitados"] = total_invitados
-	metricas["total_RAM"] = total_RAM
-	metricas["total_RAM_usada"] = total_RAM_usada
+	metricas["total_RAM"] = total_RAM / 1000             //Se divide por 1000 para pasar de Mb a Gb
+	metricas["total_RAM_usada"] = total_RAM_usada / 1000 //Se divide por 1000 para pasar de Mb a Gb
 	metricas["total_CPU"] = total_CPU
 	metricas["total_CPU_usada"] = total_CPU_usada
 
