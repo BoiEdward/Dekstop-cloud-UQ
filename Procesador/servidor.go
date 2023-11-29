@@ -672,28 +672,39 @@ func manageServer() {
 		} else if err != nil {
 			panic(err.Error())
 		}
-		/*
-			var id_host int
-			erro := db.QueryRow("SELECT id FROM host where nombre = ?", nombre).Scan(&id_host)
 
-			if erro != nil {
-				log.Println("Error al obtener el id del host creado")
-				return
-			}
+		fmt.Println("Registro del host exitoso")
+		response := map[string]bool{"registroCorrecto": true}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+	})
 
-			query = "insert into disco (nombre, ruta_ubicacion, sistema_operativo, distribucion_sistema_operativo, arquitectura, host_id) values (?, ?, ?, ?, ?, ?);"
+	http.HandleFunc("/json/addDisk", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
+			return
+		}
 
+		var disco Disco
 
-			_, err = db.Exec(query, "Debian", "C:/NewDebian.vdi", "Linux", "Debian", 64, id_host)
-			if err != nil {
-				log.Println("Error al registrar el disco.")
-				return
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&disco); err != nil {
+			http.Error(w, "Error al decodificar JSON de especificaciones", http.StatusBadRequest)
+			return
+		}
 
-			} else if err != nil {
-				panic(err.Error())
-			}
-		*/
-		fmt.Println("Registro del host correcto:")
+		query := "insert into disco (nombre, ruta_ubicacion, sistema_operativo, distribucion_sistema_operativo, arquitectura, host_id) values (?, ?, ?, ?, ?, ?);"
+
+		_, err := db.Exec(query, disco.Nombre, disco.Ruta_ubicacion, disco.Sistema_operativo, disco.Distribucion_sistema_operativo, disco.arquitectura, disco.Host_id)
+		if err != nil {
+			log.Println("Error al registrar el disco.")
+			return
+
+		} else if err != nil {
+			panic(err.Error())
+		}
+		fmt.Println("Registro del disco exitoso")
 		response := map[string]bool{"registroCorrecto": true}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
