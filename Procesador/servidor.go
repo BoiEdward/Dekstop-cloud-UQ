@@ -191,6 +191,7 @@ func main() {
 	// Función que verifica la cola de especificaciones constantemente.
 	go checkMaquinasVirtualesQueueChanges()
 
+	//Funciòn que verifica el tiempo de creaciòn de una MV
 	//go checkTime()
 
 	// Función que verifica la cola de cuentas constantemente.
@@ -1232,8 +1233,9 @@ func modifyVM(specs Maquina_virtual) string {
 	return "Modificaciones realizadas con èxito"
 }
 
-/* Funciòn que permite enviar los comandos necesarios para apagar una màquina virtual
+/* Funciòn que permite enviar el comando PowerOff para apagar una màquina virtual
 @nameVM Paràmetro que contiene el nombre de la màquina virtual a apagar
+@clientIP Paràmetro que contiene la direcciòn IP del cliente desde el cual se realiza la solicitud
 */
 
 func apagarMV(nameVM string, clientIP string) string {
@@ -1266,10 +1268,8 @@ func apagarMV(nameVM string, clientIP string) string {
 	if !running { //En caso de que la MV estè apagada, entonces se invoca el mètodo para encenderla
 		startVM(nameVM, clientIP)
 	} else {
-		//Comando para enviar señal de apagado a la MV esperando que los programas cierren correctamente
-		//acpiCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " acpipowerbutton"
 
-		//Comando para apagar la màquina sin esperar que los programas cierren
+		//Comando para apagar la màquina virtual
 		powerOffCommand := "VBoxManage controlvm " + "\"" + nameVM + "\"" + " poweroff"
 
 		fmt.Println("Apagando màquina " + nameVM + "...")
@@ -1761,7 +1761,7 @@ func getDisk(sistema_operativo string, distribucion_sistema_operativo string, id
 
 	var disco Disco
 	//err := db.QueryRow("Select * from disco where sistema_operativo = ? and distribucion_sistema_operativo =? and host_id = ?", sistema_operativo, distribucion_sistema_operativo, id_host).Scan(&disco.Id, &disco.Nombre, &disco.Ruta_ubicacion, &disco.Sistema_operativo, &disco.Distribucion_sistema_operativo, &disco.arquitectura, &disco.Host_id)
-	err := db.QueryRow("Select * from disco where sistema_operativo = ? and nombre =? and host_id = ?", sistema_operativo, distribucion_sistema_operativo, id_host).Scan(&disco.Id, &disco.Nombre, &disco.Ruta_ubicacion, &disco.Sistema_operativo, &disco.Distribucion_sistema_operativo, &disco.arquitectura, &disco.Host_id)
+	err := db.QueryRow("Select * from disco where sistema_operativo = ? and distribucion_sistema_operativo =? and host_id = ?", sistema_operativo, distribucion_sistema_operativo, id_host).Scan(&disco.Id, &disco.Nombre, &disco.Ruta_ubicacion, &disco.Sistema_operativo, &disco.Distribucion_sistema_operativo, &disco.arquitectura, &disco.Host_id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			log.Println("No se encontrò un disco: " + sistema_operativo + " " + distribucion_sistema_operativo)
@@ -2244,43 +2244,10 @@ func getMetrics() (map[string]interface{}, error) {
 	metricas["total_usuarios"] = total_usuarios
 	metricas["total_estudiantes"] = total_estudiantes
 	metricas["total_invitados"] = total_invitados
-	metricas["total_RAM"] = total_RAM / 1000             //Se divide por 1000 para pasar de Mb a Gb
-	metricas["total_RAM_usada"] = total_RAM_usada / 1000 //Se divide por 1000 para pasar de Mb a Gb
+	metricas["total_RAM"] = total_RAM / 1024             //Se divide por 1024 para pasar de Mb a Gb
+	metricas["total_RAM_usada"] = total_RAM_usada / 1024 //Se divide por 1024 para pasar de Mb a Gb
 	metricas["total_CPU"] = total_CPU
 	metricas["total_CPU_usada"] = total_CPU_usada
 
 	return metricas, nil
-}
-
-func isTempEmail(email string) bool {
-	expresionRegular := `^[a-zA-Z0-9]{5}@temp\.com$`
-	regex := regexp.MustCompile(expresionRegular)
-	return regex.MatchString(email)
-}
-
-func getMaxResourcesAvailables(host Host) (int, int) {
-
-	// Calcula el 75% de la RAM total
-	ramDisponible := int(float64(host.Ram_total) * 0.75)
-
-	// Resta la RAM usada
-	ramDisponible -= host.Ram_usada
-
-	// Asegura que la RAM disponible no sea negativa
-	if ramDisponible < 0 {
-		ramDisponible = 0
-	}
-
-	// Calcula el 75% de la CPU total
-	cpuDisponible := int(float64(host.Cpu_total) * 0.75)
-
-	// Resta la CPU utilizada
-	cpuDisponible -= host.Cpu_usada
-
-	// Asegura que la CPU disponible no sea negativa
-	if cpuDisponible < 0 {
-		cpuDisponible = 0
-	}
-
-	return ramDisponible, cpuDisponible
 }
