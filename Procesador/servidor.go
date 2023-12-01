@@ -412,6 +412,39 @@ func manageServer() {
 
 	})
 
+	//Endpoint para consultar los Host
+	http.HandleFunc("/json/consultHost", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Se requiere una solicitud POST", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var persona Persona
+		decoder := json.NewDecoder(r.Body)
+		if err := decoder.Decode(&persona); err != nil { //Solo llega el email
+			http.Error(w, "Error al decodificar JSON de inicio de sesión", http.StatusBadRequest)
+			return
+		}
+
+		persona, error := getUser(persona.Email)
+		if error != nil {
+			return
+		}
+
+		hosts, err := consultHosts()
+		if err != nil && err.Error() != "no Hosts encontrados" {
+			fmt.Println(err)
+			log.Println("Error al consultar los Host")
+			return
+		}
+
+		// Respondemos con la lista de máquinas virtuales en formato JSON
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(hosts)
+
+	})
+
 	//Endpoint para consultar el catàlogo
 	http.HandleFunc("/json/consultCatalog", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -2022,6 +2055,44 @@ func consultMachines(persona Persona) ([]Maquina_virtual, error) {
 		return machines, errors.New("no Machines Found")
 	}
 	return machines, nil
+}
+
+func consultHosts() ([]Host, error) {
+
+	var query string
+	var rows *sql.Rows
+	var err error
+
+	query = "SELECT id, nombre from host"
+	rows, err = db.Query(query)
+
+	var hosts []Host
+
+	if err != nil {
+		log.Println("Error al realizar la consulta de màquinas en la BD", err)
+		return hosts, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var host Host
+		if err := rows.Scan(&host.Id, &host.Nombre); err != nil {
+			// Manejar el error al escanear la fila
+			continue
+		}
+		hosts = append(hosts, host)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Println("Error al iterar sobre las filas ", err)
+		return hosts, err
+	}
+
+	if len(hosts) == 0 {
+		// No se encontraron máquinas virtuales para el usuario
+		return hosts, errors.New("no Machines Found")
+	}
+	return hosts, nil
 }
 
 /*
